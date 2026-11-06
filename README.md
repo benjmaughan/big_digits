@@ -1,36 +1,119 @@
-# myface
+# Big Digits: a high-visibility watchface for Pebble Time
 
-A Pebble watchapp/watchface written in C using the Pebble SDK.
-
-## Building & running
-
-```sh
-pebble build                          # build for all targetPlatforms
-pebble install --emulator emery       # install on the emery emulator
-pebble install --phone <ip>           # install to a paired phone
-```
-
-## Target platforms
-
-`targetPlatforms` in `package.json` controls which watches you build for. The
-modern Pebble hardware is **emery** (Pebble Time 2), **gabbro** (Pebble Round
-2), and **flint** (Pebble 2 Duo); the original Pebble platforms (aplite,
-basalt, chalk, diorite) are included by default for backwards compatibility.
-
-## Project layout
+A watchface for the original **Pebble Time** (`basalt` platform, 144×168 color) designed for maximum readability. The time is drawn as huge, heavy seven-segment digits that fill the screen, with a battery bar and the date underneath.
 
 ```
-src/c/           C source for the watchapp
-src/pkjs/        PebbleKit JS (phone-side) source, if any
-worker_src/c/    Background worker source, if any
-resources/       Images, fonts, and other bundled resources
-package.json     Project metadata (UUID, platforms, resources, message keys)
-wscript          Build rules — usually no need to edit
+┌──────────────┐
+│  0 7         │  hours   (64×60 px digits)
+│  5 8         │  minutes (64×60 px digits)
+│ ██████────── │  battery bar
+│  Fri Nov 06  │  date
+└──────────────┘
 ```
 
-By default this project is configured as a watchapp. To make it a watchface,
-set `pebble.watchapp.watchface` to `true` in `package.json`.
+## Features
 
-## Documentation
+- **Huge bold digits.** Hours and minutes are stacked on two rows, each digit 64×60 px, drawn from thick segments rather than a system font (Pebble's built-in fonts are too small for this).
+- **Battery bar.** A thick bar shows the charge remaining; the used portion is shown as a much thinner line. As the battery drains the thick section shrinks.
+  - Green above 40%
+  - Yellow 21–40%
+  - Red 20% and below
+- **Date line.** Day, month and date in Gothic 24 Bold, e.g. `Fri Nov 06`.
+- **12/24-hour aware.** Follows the watch's clock-style setting.
+- **Battery-friendly.** Redraws once per minute and on battery-level changes only.
 
-Full SDK docs, tutorials, and API reference: <https://developer.repebble.com>
+## Requirements
+
+- macOS (Linux and WSL also work)
+- [Node.js](https://nodejs.org/) and libpng (via Homebrew: `brew install node libpng`, or MacPorts: `sudo port install nodejs22 libpng`)
+- [uv](https://docs.astral.sh/uv/) (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
+- The Pebble tool, which needs Python 3.10–3.13 (Python 3.14 is not yet supported). uv will fetch a suitable Python automatically if needed, without touching conda or system Pythons.
+
+## Setup
+
+```bash
+# Install the Pebble command-line tool in its own isolated environment
+uv tool install pebble-tool --python 3.13
+
+# Install the latest SDK
+pebble sdk install latest
+
+# Check it works
+pebble --version
+```
+
+If `pebble` isn't found afterwards, run `uv tool update-shell` and open a new terminal.
+
+## Build
+
+```bash
+git clone <your-repo-url>
+cd <your-repo-directory>
+pebble build
+```
+
+The watchface is written to `build/<project-name>.pbw`.
+
+## Try it in the emulator
+
+```bash
+pebble install --emulator basalt
+pebble logs --emulator basalt   # optional: view app logs
+```
+
+The emulator menu lets you simulate different battery levels, which is handy for checking the bar and its color thresholds.
+
+## Install on your Pebble Time
+
+**Option A: directly from your computer (best while developing)**
+
+1. Install the Pebble mobile app ([repebble.com/app](https://repebble.com/app)) and pair your watch.
+2. In the app, enable **Developer Connection**. It displays your phone's IP address.
+3. With your phone and computer on the same Wi-Fi network:
+
+   ```bash
+   pebble install --phone <phone-ip-address>
+   ```
+
+**Option B: via the phone app**
+
+Send `build/*.pbw` to your phone (AirDrop, email, cloud drive) and open it with the Pebble app, which will offer to install it on the watch.
+
+Then select the watchface from the watch's menu or the phone app.
+
+## Customization
+
+All tweakable values are `#define`s at the top of `src/c/main.c`:
+
+| Constant | Default | Effect |
+|---|---|---|
+| `SEG_T` | `12` | Segment thickness. Larger is bolder (14 is very heavy). |
+| `DIGIT_W` / `DIGIT_H` | `64` / `60` | Size of each digit. |
+| `DIGIT_GAP` | `8` | Horizontal gap between the two digits of a row. |
+| `BAR_THICK` / `BAR_THIN` | `10` / `2` | Height of the battery bar's thick and thin sections. |
+| `BAR_Y` | `130` | Vertical position of the battery bar. |
+
+Other easy changes:
+
+- **Colors.** Digits use `GColorWhite` on `GColorBlack`; change them in `canvas_update` and `window_load`. Any `GColor...` constant or `GColorFromHEX(0xRRGGBB)` works.
+- **Battery thresholds.** Edit the `s_battery > 40` / `> 20` checks in `canvas_update`.
+- **Date size.** Try `FONT_KEY_GOTHIC_28_BOLD` if it fits.
+
+## Project structure
+
+```
+.
+├── package.json      # Pebble app manifest (watchface: true, platform: basalt)
+├── wscript           # Build script generated by `pebble new-project`
+└── src/
+    └── c/
+        └── main.c    # The entire watchface
+```
+
+## How it works
+
+Digits are rendered with a custom `Layer` update procedure. Each digit is a seven-segment pattern (`SEGMENTS[]` bitmask table) drawn with `graphics_fill_rect`. A minute tick timer updates the time and date, and a battery state subscription updates the bar. The layout is hard-coded for the 144×168 Pebble Time screen, so the project targets `basalt` only.
+
+## License
+
+Choose a license for your repo (for example MIT) and add a `LICENSE` file.
