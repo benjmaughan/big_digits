@@ -10,7 +10,10 @@
  *   - The date (e.g. "Fri Nov 06").
  *
  * USER SETTINGS (edited on the phone with Clay, stored on the watch)
- *   1. High contrast      : pure white on black, no battery color coding.
+ *   1. Color scheme       : Standard (white on black, color-coded battery),
+ *                           High contrast (pure white on black), or
+ *                           Classic LCD (black on a pale yellow-green, like
+ *                           an old digital watch or calculator).
  *   2. Digit gaps         : LCD-style pointed segments with small gaps,
  *                           instead of solid, merged bars.
  *   3. Segmented battery  : 10 full/hollow blocks instead of a smooth bar.
@@ -34,7 +37,7 @@
  *
  * HOW THE CODE IS ORGANISED
  *   1. Constants       (all the numbers you might want to tweak)
- *   2. Settings        (load / save / defaults)
+ *   2. Settings        (load / save / defaults, and the color palettes)
  *   3. Layout          (works out where everything goes for each layout)
  *   4. Drawing         (digits, battery, date)
  *   5. Time + events   (minute tick, battery events, settings from phone)
@@ -54,6 +57,27 @@ enum {
   LAYOUT_SIDE_BAR_VDATE  = 2,  /* vertical bar, date stacked vertically      */
   LAYOUT_COUNT                 /* number of layouts; used for range checks   */
 };
+
+/* ---- Color scheme identifiers (stored in the settings; keep stable) ---- */
+enum {
+  SCHEME_STANDARD       = 0,  /* white on black, color-coded battery         */
+  SCHEME_HIGH_CONTRAST  = 1,  /* pure white on black, nothing else           */
+  SCHEME_LCD            = 2,  /* black on pale yellow-green, like old LCDs   */
+  SCHEME_COUNT                /* number of schemes; used for range checks    */
+};
+
+/*
+ * Classic LCD colors. Pebble Time can only show 64 colors (4 levels each of
+ * red, green and blue), so an exact LCD green isn't possible; these are the
+ * closest matches. To change the look, swap LCD_BACKGROUND for another
+ * palette color, e.g.:
+ *   GColorBrass       a greyer, more khaki yellow-green
+ *   GColorMintGreen   a paler, cooler green
+ *   GColorSpringBud   a stronger, more saturated lime
+ *   GColorPastelYellow  a pale cream
+ */
+#define LCD_BACKGROUND  GColorInchworm   /* the "unlit" LCD surface          */
+#define LCD_INK         GColorBlack      /* the "lit" segments and text      */
 
 /* ---- STANDARD layout: digits ---- */
 #define STD_DIGIT_W     64   /* width of one digit in pixels                 */
@@ -81,10 +105,10 @@ enum {
 
 /* ---- SIDE_BAR layout: digits ---- */
 #define SB_DIGIT_H       65  /* digit height (width is worked out to fit)    */
-#define SB_SEG_T          9  /* segment thickness                            */
+#define SB_SEG_T         10  /* segment thickness                            */
 #define SB_DIGIT_GAP      8  /* gap between the two digits of a row          */
 #define SB_ROW1_Y         2
-#define SB_ROW2_Y        76
+#define SB_ROW2_Y        73
 
 /* ---- SIDE_BAR_VDATE layout: digits and date column ---- */
 #define SBV_DIGIT_H      76  /* taller digits: the date no longer needs the
@@ -106,7 +130,9 @@ enum {
 #define BAR_THICK        10  /* horizontal bar height (vertical bar width is
                                 VBAR_W)                                      */
 #define BAR_THIN          2  /* thickness of the "used" line, normal mode    */
-#define BAR_THIN_HC       3  /* thickness of the "used" line, high contrast  */
+#define BAR_THIN_HC       3  /* thickness of the "used" line in the single-
+                                color schemes (high contrast and LCD), where
+                                it can't be told apart by color              */
 
 /* ---- Segmented battery (10 blocks) ---- */
 #define BLOCKS           10  /* number of blocks; each is worth 10%          */
@@ -116,7 +142,7 @@ enum {
 #define BLOCK_BORDER      2  /* outline thickness of a hollow block          */
 
 /* ---- Persistent storage key ---- */
-#define SETTINGS_KEY      2  /* bumped from 1 because the struct changed     */
+#define SETTINGS_KEY      3  /* bumped because the settings struct changed   */
 
 /* ======================================================================
  * 2. SETTINGS
@@ -127,7 +153,7 @@ enum {
  * persistent storage in one go, so it survives restarts and battery swaps.
  */
 typedef struct {
-  bool    high_contrast;      /* pure white/black, no color-coded battery    */
+  uint8_t color_scheme;       /* one of the SCHEME_* values                  */
   bool    digit_gaps;         /* LCD-style segments with gaps                */
   bool    segmented_battery;  /* 10 blocks instead of a smooth bar           */
   uint8_t layout;             /* one of the LAYOUT_* values                  */
@@ -143,7 +169,9 @@ static Settings s_settings;
 static void settings_load(void) {
   /* Defaults first, so any field not loaded below has a sane value. */
   s_settings = (Settings){
-    .high_contrast     = false,
+    /* .color_scheme      = SCHEME_STANDARD, */
+    /* .color_scheme      = SCHEME_HIGH_CONTRAST, */
+    .color_scheme      = SCHEME_LCD,
     .digit_gaps        = true,
     .segmented_battery = true,
     /* .layout            = LAYOUT_STANDARD, */
@@ -156,9 +184,12 @@ static void settings_load(void) {
     persist_read_data(SETTINGS_KEY, &s_settings, sizeof(s_settings));
   }
 
-  /* Guard against corrupt data: an out-of-range layout falls back. */
+  /* Guard against corrupt data: out-of-range values fall back. */
   if (s_settings.layout >= (uint8_t)LAYOUT_COUNT) {
     s_settings.layout = LAYOUT_STANDARD;
+  }
+  if (s_settings.color_scheme >= (uint8_t)SCHEME_COUNT) {
+    s_settings.color_scheme = SCHEME_STANDARD;
   }
 }
 
@@ -424,39 +455,76 @@ static void draw_digit(GContext *ctx, int d, int x, int y, const Layout *L) {
   }
 }
 
-/* ---------- Battery ---------- */
+/* ---------- Colors ---------- */
 
 /*
- * Choose the two battery colors.
- *   on  : the "charge remaining" part
- *   off : the "charge used" part
- * High contrast uses plain white for both. Normal mode color-codes the
- * remaining charge: green above 40%, yellow 21-40%, red 20% and below.
+ * The set of colors used to draw one frame. Working these out in one place
+ * means the drawing code never needs to know which color scheme is active;
+ * it just uses whatever the palette says.
  */
-static void battery_colors(GColor *on, GColor *off) {
-  if (s_settings.high_contrast) {
-    *on  = GColorWhite;
-    *off = GColorWhite;
-  } else {
-    *on  = (s_battery > 40) ? GColorGreen
-         : (s_battery > 20) ? GColorYellow
-         :                    GColorRed;
-    *off = GColorLightGray;
+typedef struct {
+  GColor background;   /* the screen, and the inside of hollow battery blocks */
+  GColor digits;       /* the time digits and the date text                    */
+  GColor bar_on;       /* battery: the charge remaining                        */
+  GColor bar_off;      /* battery: the charge used                             */
+} Palette;
+
+/*
+ * Fill in the palette for the current color scheme.
+ *
+ *   Standard      : white on black. The remaining charge is color-coded:
+ *                   green above 40%, yellow 21-40%, red 20% and below, with
+ *                   the used portion in light gray.
+ *   High contrast : pure white on black, battery included.
+ *   Classic LCD   : black "ink" on a pale yellow-green background, battery
+ *                   included, like the display of an old digital watch.
+ *
+ * In the two single-color schemes the "remaining" and "used" parts of the
+ * battery are the same color; they are told apart by thickness (thick bar
+ * vs. thin line) or by solid vs. hollow blocks.
+ */
+static void palette_get(Palette *p) {
+  switch (s_settings.color_scheme) {
+    case SCHEME_HIGH_CONTRAST:
+      p->background = GColorBlack;
+      p->digits     = GColorWhite;
+      p->bar_on     = GColorWhite;
+      p->bar_off    = GColorWhite;
+      break;
+
+    case SCHEME_LCD:
+      p->background = LCD_BACKGROUND;
+      p->digits     = LCD_INK;
+      p->bar_on     = LCD_INK;
+      p->bar_off    = LCD_INK;
+      break;
+
+    case SCHEME_STANDARD:
+    default:
+      p->background = GColorBlack;
+      p->digits     = GColorWhite;
+      p->bar_on     = (s_battery > 40) ? GColorGreen
+                    : (s_battery > 20) ? GColorYellow
+                    :                    GColorRed;
+      p->bar_off    = GColorLightGray;
+      break;
   }
 }
+
+/* ---------- Battery ---------- */
 
 /*
  * Draw one block of the segmented battery.
  *   filled : solid block in the "on" color
- *   hollow : outline in the "off" color with a black interior
+ *   hollow : outline in the "off" color with the background color inside
  */
 static void draw_block(GContext *ctx, int x, int y, int w, int h,
-                       bool filled, GColor on, GColor off) {
-  graphics_context_set_fill_color(ctx, filled ? on : off);
+                       bool filled, const Palette *P) {
+  graphics_context_set_fill_color(ctx, filled ? P->bar_on : P->bar_off);
   fill(ctx, x, y, w, h);
   if (!filled) {
     /* Punch out the middle so only a border of BLOCK_BORDER px remains. */
-    graphics_context_set_fill_color(ctx, GColorBlack);
+    graphics_context_set_fill_color(ctx, P->background);
     fill(ctx, x + BLOCK_BORDER, y + BLOCK_BORDER,
          w - 2 * BLOCK_BORDER, h - 2 * BLOCK_BORDER);
   }
@@ -474,10 +542,7 @@ static void draw_block(GContext *ctx, int x, int y, int w, int h,
  * Horizontal bars fill from left to right; vertical bars fill from the
  * bottom up (like a thermometer).
  */
-static void draw_battery(GContext *ctx, const Layout *L) {
-  GColor on, off;
-  battery_colors(&on, &off);
-
+static void draw_battery(GContext *ctx, const Layout *L, const Palette *P) {
   const GRect r = L->battery_rect;
 
   if (s_settings.segmented_battery) {
@@ -491,7 +556,7 @@ static void draw_battery(GContext *ctx, const Layout *L) {
         /* Block 0 is the bottom one, so it is lit first as charge rises. */
         const int by = y0 + (BLOCKS - 1 - i) * (VBLOCK_H + BLOCK_GAP);
         draw_block(ctx, r.origin.x, by, r.size.w, VBLOCK_H,
-                   i < filled, on, off);
+                   i < filled, P);
       }
     } else {
       const int total = BLOCKS * HBLOCK_W + (BLOCKS - 1) * BLOCK_GAP;
@@ -499,32 +564,35 @@ static void draw_battery(GContext *ctx, const Layout *L) {
       for (int i = 0; i < BLOCKS; i++) {
         const int bx = x0 + i * (HBLOCK_W + BLOCK_GAP);
         draw_block(ctx, bx, r.origin.y, HBLOCK_W, r.size.h,
-                   i < filled, on, off);
+                   i < filled, P);
       }
     }
   } else {
     /* ---- Continuous: thick "remaining" bar + thin "used" line ---- */
-    const int thin = s_settings.high_contrast ? BAR_THIN_HC : BAR_THIN;
+    /* In the single-color schemes the thin line needs to be a bit thicker
+     * to stay clearly visible, since it can't be told apart by color. */
+    const int thin = (s_settings.color_scheme == SCHEME_STANDARD)
+                       ? BAR_THIN : BAR_THIN_HC;
 
     if (L->battery_vertical) {
       const int fill_h = r.size.h * s_battery / 100;        /* thick part */
       const int fill_y = r.origin.y + r.size.h - fill_h;    /* its top    */
 
-      graphics_context_set_fill_color(ctx, on);
+      graphics_context_set_fill_color(ctx, P->bar_on);
       fill(ctx, r.origin.x, fill_y, r.size.w, fill_h);
 
       /* Thin line occupies the empty space above, centred in the bar. */
-      graphics_context_set_fill_color(ctx, off);
+      graphics_context_set_fill_color(ctx, P->bar_off);
       fill(ctx, r.origin.x + (r.size.w - thin) / 2, r.origin.y,
            thin, r.size.h - fill_h);
     } else {
       const int fill_w = r.size.w * s_battery / 100;
 
-      graphics_context_set_fill_color(ctx, on);
+      graphics_context_set_fill_color(ctx, P->bar_on);
       fill(ctx, r.origin.x, r.origin.y, fill_w, r.size.h);
 
       /* Thin line occupies the empty space to the right, centred. */
-      graphics_context_set_fill_color(ctx, off);
+      graphics_context_set_fill_color(ctx, P->bar_off);
       fill(ctx, r.origin.x + fill_w, r.origin.y + (r.size.h - thin) / 2,
            r.size.w - fill_w, thin);
     }
@@ -539,7 +607,7 @@ static void draw_battery(GContext *ctx, const Layout *L) {
  * (possible in the side-bar layout with a long name like "Wed Sep 30"),
  * it falls back to the next size down so nothing is cut off.
  */
-static void draw_date_horizontal(GContext *ctx, GRect area) {
+static void draw_date_horizontal(GContext *ctx, GRect area, GColor color) {
   GFont font = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
   int y_nudge = 0;
 
@@ -555,7 +623,7 @@ static void draw_date_horizontal(GContext *ctx, GRect area) {
   }
 
   area.origin.y += y_nudge;
-  graphics_context_set_text_color(ctx, GColorWhite);
+  graphics_context_set_text_color(ctx, color);
   graphics_draw_text(ctx, s_date_full, font, area,
                      GTextOverflowModeTrailingEllipsis,
                      GTextAlignmentCenter, NULL);
@@ -581,7 +649,7 @@ static void draw_date_horizontal(GContext *ctx, GRect area) {
  * are exactly VDATE_GROUP_GAP, and the whole stack can be centred
  * vertically in the column.
  */
-static void draw_date_vertical(GContext *ctx, GRect col) {
+static void draw_date_vertical(GContext *ctx, GRect col, GColor color) {
   const char *groups[3] = { s_dow, s_mon, s_dom };
   GFont font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
 
@@ -593,7 +661,7 @@ static void draw_date_vertical(GContext *ctx, GRect col) {
   const int total = chars * VDATE_PITCH + 2 * VDATE_GROUP_GAP;
   int y = col.origin.y + (col.size.h - total) / 2;
 
-  graphics_context_set_text_color(ctx, GColorWhite);
+  graphics_context_set_text_color(ctx, color);
 
   for (int g = 0; g < 3; g++) {
     for (const char *p = groups[g]; *p != '\0'; p++) {
@@ -618,27 +686,38 @@ static void draw_date_vertical(GContext *ctx, GRect col) {
  * layer_mark_dirty). Everything on the face is drawn here.
  */
 static void canvas_update(Layer *layer, GContext *ctx) {
+  const GRect bounds = layer_get_bounds(layer);
+
   Layout L;
-  layout_compute(&L, layer_get_bounds(layer));
+  layout_compute(&L, bounds);
+
+  Palette P;
+  palette_get(&P);
+
+  /* Paint the whole screen in the background color first. Layers are
+   * transparent by default, so without this the previous frame (or the
+   * window color) would show through. */
+  graphics_context_set_fill_color(ctx, P.background);
+  fill(ctx, bounds.origin.x, bounds.origin.y, bounds.size.w, bounds.size.h);
 
   /* Digits: hours on the top row, minutes below. */
   const int xa = L.x0;                              /* first digit  */
   const int xb = L.x0 + L.digit_w + L.digit_gap;    /* second digit */
 
-  graphics_context_set_fill_color(ctx, GColorWhite);
+  graphics_context_set_fill_color(ctx, P.digits);
   draw_digit(ctx, s_hour / 10, xa, L.row1_y, &L);
   draw_digit(ctx, s_hour % 10, xb, L.row1_y, &L);
   draw_digit(ctx, s_min  / 10, xa, L.row2_y, &L);
   draw_digit(ctx, s_min  % 10, xb, L.row2_y, &L);
 
-  /* Battery (changes fill color internally). */
-  draw_battery(ctx, &L);
+  /* Battery (sets its own fill colors internally). */
+  draw_battery(ctx, &L, &P);
 
-  /* Date. */
+  /* Date, in the same color as the digits. */
   if (L.date_vertical) {
-    draw_date_vertical(ctx, L.date_rect);
+    draw_date_vertical(ctx, L.date_rect, P.digits);
   } else {
-    draw_date_horizontal(ctx, L.date_rect);
+    draw_date_horizontal(ctx, L.date_rect, P.digits);
   }
 }
 
@@ -667,6 +746,19 @@ static void update_time(void) {
 
   if (s_canvas) {
     layer_mark_dirty(s_canvas);
+  }
+}
+
+/*
+ * Keep the window's own background in step with the color scheme. The canvas
+ * paints over the whole screen anyway, but this avoids a flash of the wrong
+ * color while the window slides in.
+ */
+static void apply_window_background(void) {
+  if (s_window) {
+    Palette p;
+    palette_get(&p);
+    window_set_background_color(s_window, p.background);
   }
 }
 
@@ -703,8 +795,10 @@ static int tuple_to_int(const Tuple *t) {
 static void inbox_received(DictionaryIterator *iter, void *context) {
   Tuple *t;
 
-  if ((t = dict_find(iter, MESSAGE_KEY_HighContrast))) {
-    s_settings.high_contrast = (tuple_to_int(t) == 1);
+  if ((t = dict_find(iter, MESSAGE_KEY_ColorScheme))) {
+    int v = tuple_to_int(t);
+    s_settings.color_scheme = (v >= 0 && v < SCHEME_COUNT) ? (uint8_t)v
+                                                           : SCHEME_STANDARD;
   }
   if ((t = dict_find(iter, MESSAGE_KEY_DigitGaps))) {
     s_settings.digit_gaps = (tuple_to_int(t) == 1);
@@ -719,6 +813,7 @@ static void inbox_received(DictionaryIterator *iter, void *context) {
   }
 
   settings_save();
+  apply_window_background();
   if (s_canvas) {
     layer_mark_dirty(s_canvas);
   }
@@ -733,7 +828,7 @@ static void window_load(Window *window) {
   Layer *root = window_get_root_layer(window);
   GRect bounds = layer_get_bounds(root);
 
-  window_set_background_color(window, GColorBlack);
+  apply_window_background();
 
   s_canvas = layer_create(bounds);
   layer_set_update_proc(s_canvas, canvas_update);

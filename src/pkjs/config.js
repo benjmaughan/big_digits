@@ -33,11 +33,16 @@ module.exports = [
     "items": [
       { "type": "heading", "defaultValue": "Appearance" },
       {
-        "type": "toggle",
-        "messageKey": "HighContrast",
-        "label": "High contrast",
-        "description": "Pure white on black everywhere, no color coding, thicker battery line.",
-        "defaultValue": false
+        "type": "select",
+        "messageKey": "ColorScheme",
+        "label": "Color scheme",
+        "description": "Standard: white on black with a color-coded battery. High contrast: pure white on black. Classic LCD: black on pale yellow-green.",
+        "defaultValue": "0",
+        "options": [
+          { "label": "Standard",      "value": "0" },
+          { "label": "High contrast", "value": "1" },
+          { "label": "Classic LCD",   "value": "2" }
+        ]
       },
       {
         "type": "toggle",
