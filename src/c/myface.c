@@ -80,11 +80,11 @@ enum {
 #define BAR_GAP          10  /* gap between the digits and the battery bar   */
 
 /* ---- SIDE_BAR layout: digits ---- */
-#define SB_DIGIT_H       60  /* digit height (width is worked out to fit)    */
+#define SB_DIGIT_H       65  /* digit height (width is worked out to fit)    */
 #define SB_SEG_T          9  /* segment thickness                            */
 #define SB_DIGIT_GAP      8  /* gap between the two digits of a row          */
 #define SB_ROW1_Y         2
-#define SB_ROW2_Y        66
+#define SB_ROW2_Y        76
 
 /* ---- SIDE_BAR_VDATE layout: digits and date column ---- */
 #define SBV_DIGIT_H      76  /* taller digits: the date no longer needs the
