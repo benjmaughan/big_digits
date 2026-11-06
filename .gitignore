@@ -1,0 +1,93 @@
+# ==========================================
+# Pebble SDK build outputs
+# ==========================================
+
+build/
+*.pbw
+
+# ==========================================
+# C compilation artefacts
+# ==========================================
+
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+*.elf
+*.out
+
+# Dependency and compiler-generated files
+*.d
+*.gcda
+*.gcno
+*.gcov
+
+# ==========================================
+# C debugging and profiling
+# ==========================================
+
+*.core
+core
+core.*
+*.prof
+*.profraw
+
+# ==========================================
+# Test and coverage outputs
+# ==========================================
+
+coverage/
+lcov-report/
+*.info
+
+# ==========================================
+# macOS
+# ==========================================
+
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# ==========================================
+# Editors and IDEs
+# ==========================================
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+\#*\#
+.\#*
+
+# Visual Studio Code: ignore workspace-local
+# temporary files, but keep shared settings
+.vscode/*.log
+
+# JetBrains IDEs
+.idea/
+
+# ==========================================
+# Logs and temporary files
+# ==========================================
+
+*.log
+*.tmp
+*.bak
+*.orig
+*.rej
+
+# ==========================================
+# Python (if used for build or helper scripts)
+# ==========================================
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
