@@ -17,7 +17,7 @@ module.exports = [
         "type": "select",
         "messageKey": "Layout",
         "label": "Arrangement",
-        "defaultValue": "1",
+        "defaultValue": "2",
         "options": [
           { "label": "Battery under time, date at bottom", "value": "0" },
           { "label": "Vertical battery bar at right",      "value": "1" },
@@ -29,7 +29,7 @@ module.exports = [
         "messageKey": "DateFormat",
         "label": "Date format",
         "description": "Numeric shows day | month | year with bars between the fields.",
-        "defaultValue": "0",
+        "defaultValue": "1",
         "options": [
           { "label": "Text (Fri Nov 06)",       "value": "0" },
           { "label": "Numeric (06 | 11 | 26)",  "value": "1" }
@@ -68,6 +68,26 @@ module.exports = [
         "label": "Segmented battery bar",
         "description": "10 blocks, each full or hollow, in 10% steps.",
         "defaultValue": true
+      }
+    ]
+  },
+
+  /* ---- Bluetooth ---- */
+  {
+    "type": "section",
+    "items": [
+      { "type": "heading", "defaultValue": "Bluetooth" },
+      {
+        "type": "select",
+        "messageKey": "BtVibrate",
+        "label": "Vibrate",
+        "description": "The disconnected icon always shows while Bluetooth is down. Vibration is skipped during Quiet Time.",
+        "defaultValue": "2",
+        "options": [
+          { "label": "Off",                          "value": "0" },
+          { "label": "When disconnected",            "value": "1" },
+          { "label": "When disconnected and reconnected", "value": "2" }
+        ]
       }
     ]
   },

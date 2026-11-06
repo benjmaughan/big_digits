@@ -7,6 +7,8 @@
  * WHAT IT DRAWS
  *   - The time as two rows of huge seven-segment digits (HH over MM).
  *   - A battery bar.
+ *   - A Bluetooth-disconnected indicator (only visible while disconnected),
+ *     with optional vibration when the connection drops or returns.
  *   - The date, either as text ("Fri Nov 06") or numerically with bars
  *     between the fields ("06 | 11 | 26", i.e. dd | mm | yy).
  *
@@ -23,6 +25,9 @@
  *                           In the numeric format the fields are separated
  *                           by vertical bars when the date is horizontal,
  *                           and by horizontal bars when it is vertical.
+ *   6. Bluetooth vibration: off / on disconnect / on disconnect and
+ *                           reconnect. (The indicator itself always shows
+ *                           while disconnected.)
  *
  * QUICK TWEAK GUIDE
  *   Everything below is a #define in section 1. Edit, rebuild, repeat.
@@ -49,6 +54,11 @@
  *   Time digits
  *     Standard layout ........ STD_*      Side-bar layout ... SB_*
  *     Vertical-date layout ... SBV_*
+ *   Bluetooth indicator
+ *     Size ................... BT_ICON_W, BT_ICON_H, BT_ICON_STROKE
+ *     Space it takes from the battery bar ... BT_ICON_GAP
+ *     Vibration patterns ..... BT_VIBE_DISCONNECT_PATTERN,
+ *                              BT_VIBE_RECONNECT_PATTERN
  *   Default settings ......... settings_load() in section 2
  *
  * LAYOUTS
@@ -95,6 +105,14 @@ enum {
   DATE_FORMAT_TEXT     = 0,  /* "Fri Nov 06"                                 */
   DATE_FORMAT_NUMERIC  = 1,  /* "06 | 11 | 26"  (day | month | 2-digit year) */
   DATE_FORMAT_COUNT          /* number of formats; used for range checks     */
+};
+
+/* ---- Bluetooth vibration identifiers (stored in the settings) ---- */
+enum {
+  BT_VIBE_OFF         = 0,  /* never vibrate                                 */
+  BT_VIBE_DISCONNECT  = 1,  /* vibrate when the connection is lost           */
+  BT_VIBE_BOTH        = 2,  /* vibrate on loss and again on reconnection     */
+  BT_VIBE_COUNT             /* number of options; used for range checks      */
 };
 
 /* ---- Color scheme identifiers (stored in the settings; keep stable) ---- */
@@ -246,6 +264,36 @@ enum {
 #define VDATE_NUM_NUDGE     8   /* lifts digits to cancel the font's top
                                    padding; raise it to move digits up       */
 
+/*
+ * ---- Bluetooth-disconnected indicator ----
+ * While the watch is disconnected from the phone, a Bluetooth symbol with a
+ * slash through it is drawn at one end of the battery bar, and the bar gives
+ * up that much length to make room (it returns to full length when the
+ * connection comes back). The segmented battery shrinks its blocks if it has
+ * to, so all 10 still fit.
+ *
+ * The icon is drawn from lines, so there are no image files to manage.
+ */
+#define BT_ICON_W         10  /* icon width in pixels                        */
+#define BT_ICON_H         16  /* icon height in pixels                       */
+#define BT_ICON_GAP        4  /* space between the icon and the bar          */
+#define BT_ICON_STROKE     1  /* line thickness of the Bluetooth symbol      */
+#define BT_ICON_SLASH      2  /* line thickness of the slash through it;
+                                 0 = no slash (just the plain symbol)        */
+#define BT_ICON_KNOCKOUT   2  /* extra width of a background-colored channel
+                                 cut around the slash so it stands out from
+                                 the symbol. 0 = none                        */
+
+/*
+ * Vibration patterns, as alternating durations in milliseconds, starting
+ * with a vibration: { buzz, pause, buzz, pause, ... }.
+ *   disconnect : two firm buzzes
+ *   reconnect  : one short buzz
+ * Vibration is skipped while Quiet Time is on.
+ */
+#define BT_VIBE_DISCONNECT_PATTERN  { 300, 120, 300 }
+#define BT_VIBE_RECONNECT_PATTERN   { 120 }
+
 /* ---- Battery bar styling ---- */
 #define BAR_THICK        10  /* horizontal bar height (vertical bar width is
                                 VBAR_W)                                      */
@@ -262,7 +310,7 @@ enum {
 #define BLOCK_BORDER      2  /* outline thickness of a hollow block          */
 
 /* ---- Persistent storage key ---- */
-#define SETTINGS_KEY      4  /* bumped because the settings struct changed   */
+#define SETTINGS_KEY      5  /* bumped because the settings struct changed   */
 
 /* ======================================================================
  * 2. SETTINGS
@@ -278,6 +326,7 @@ typedef struct {
   bool    segmented_battery;  /* 10 blocks instead of a smooth bar           */
   uint8_t layout;             /* one of the LAYOUT_* values                  */
   uint8_t date_format;        /* one of the DATE_FORMAT_* values             */
+  uint8_t bt_vibrate;         /* one of the BT_VIBE_* values                 */
 } Settings;
 
 static Settings s_settings;
@@ -300,6 +349,9 @@ static void settings_load(void) {
     .layout            = LAYOUT_SIDE_BAR_VDATE,
     /* .date_format       = DATE_FORMAT_TEXT, */
     .date_format       = DATE_FORMAT_NUMERIC,
+    /* .bt_vibrate        = BT_VIBE_OFF, */
+    /* .bt_vibrate        = BT_VIBE_DISCONNECT, */
+    .bt_vibrate        = BT_VIBE_BOTH,
   };
 
   if (persist_exists(SETTINGS_KEY) &&
@@ -317,6 +369,9 @@ static void settings_load(void) {
   if (s_settings.date_format >= (uint8_t)DATE_FORMAT_COUNT) {
     s_settings.date_format = DATE_FORMAT_TEXT;
   }
+  if (s_settings.bt_vibrate >= (uint8_t)BT_VIBE_COUNT) {
+    s_settings.bt_vibrate = BT_VIBE_DISCONNECT;
+  }
 }
 
 static void settings_save(void) {
@@ -332,6 +387,8 @@ static Layer  *s_canvas;   /* full-screen layer; everything is drawn on it   */
 
 static GFont s_date_font;          /* font for the horizontal date (see
                                       DATE_FONT_KEY / DATE_USE_CUSTOM_FONT)  */
+
+static bool s_bt_connected = true; /* is the phone connected?               */
 
 static int s_hour, s_min;          /* time to display (hour already 12/24h)  */
 static int s_battery = 100;        /* battery charge, 0-100                  */
@@ -390,6 +447,10 @@ typedef struct {
   /* Date */
   bool date_vertical;     /* true = one character per line                   */
   GRect date_rect;        /* box the date is drawn in                        */
+
+  /* Bluetooth-disconnected indicator */
+  bool show_bt;           /* true while disconnected                         */
+  GRect bt_rect;          /* where the icon goes (only valid if show_bt)     */
 } Layout;
 
 /*
@@ -399,6 +460,8 @@ typedef struct {
 static void layout_compute(Layout *L, GRect b) {
   const int w = b.size.w;
   const int h = b.size.h;
+
+  L->show_bt = false;   /* switched on at the end if we are disconnected */
 
   switch (s_settings.layout) {
 
@@ -486,6 +549,33 @@ static void layout_compute(Layout *L, GRect b) {
       L->date_vertical = false;
       L->date_rect = GRect(0, DATE_Y, w, DATE_H);
       break;
+    }
+  }
+
+  /*
+   * Bluetooth indicator. While disconnected, take a slice off one end of
+   * the battery bar and put the icon there:
+   *   vertical bar   : the icon goes at the top, centred on the bar
+   *   horizontal bar : the icon goes at the left, centred on the bar
+   * Because everything else is positioned from battery_rect, the bar (and
+   * its fill level) simply scales down to the shorter length.
+   */
+  if (!s_bt_connected) {
+    GRect *bar = &L->battery_rect;
+    L->show_bt = true;
+
+    if (L->battery_vertical) {
+      const int cx = bar->origin.x + bar->size.w / 2;
+      L->bt_rect = GRect(cx - BT_ICON_W / 2, bar->origin.y,
+                         BT_ICON_W, BT_ICON_H);
+      bar->origin.y += BT_ICON_H + BT_ICON_GAP;
+      bar->size.h   -= BT_ICON_H + BT_ICON_GAP;
+    } else {
+      const int cy = bar->origin.y + bar->size.h / 2;
+      L->bt_rect = GRect(bar->origin.x, cy - BT_ICON_H / 2,
+                         BT_ICON_W, BT_ICON_H);
+      bar->origin.x += BT_ICON_W + BT_ICON_GAP;
+      bar->size.w   -= BT_ICON_W + BT_ICON_GAP;
     }
   }
 }
@@ -598,6 +688,7 @@ typedef struct {
   GColor digits;       /* the time digits and the date text                    */
   GColor bar_on;       /* battery: the charge remaining                        */
   GColor bar_off;      /* battery: the charge used                             */
+  GColor alert;        /* the Bluetooth-disconnected indicator                 */
 } Palette;
 
 /*
@@ -621,6 +712,7 @@ static void palette_get(Palette *p) {
       p->digits     = GColorWhite;
       p->bar_on     = GColorWhite;
       p->bar_off    = GColorWhite;
+      p->alert      = GColorWhite;
       break;
 
     case SCHEME_LCD:
@@ -628,6 +720,7 @@ static void palette_get(Palette *p) {
       p->digits     = LCD_INK;
       p->bar_on     = LCD_INK;
       p->bar_off    = LCD_INK;
+      p->alert      = LCD_INK;
       break;
 
     case SCHEME_STANDARD:
@@ -638,6 +731,7 @@ static void palette_get(Palette *p) {
                     : (s_battery > 20) ? GColorYellow
                     :                    GColorRed;
       p->bar_off    = GColorLightGray;
+      p->alert      = GColorRed;
       break;
   }
 }
@@ -680,21 +774,36 @@ static void draw_battery(GContext *ctx, const Layout *L, const Palette *P) {
     /* ---- Segmented: 10 blocks ---- */
     const int filled = (s_battery + 5) / 10;   /* 0-10, nearest 10% */
 
+    /*
+     * Each block is its preferred size (VBLOCK_H / HBLOCK_W), but is made
+     * smaller if the bar is too short for ten of them (which happens while
+     * the Bluetooth icon is taking up one end of the bar).
+     */
     if (L->battery_vertical) {
-      const int total = BLOCKS * VBLOCK_H + (BLOCKS - 1) * BLOCK_GAP;
-      const int y0 = r.origin.y + (r.size.h - total) / 2;   /* centre */
+      int block_h = (r.size.h - (BLOCKS - 1) * BLOCK_GAP) / BLOCKS;
+      if (block_h > VBLOCK_H) block_h = VBLOCK_H;
+
+      const int total = BLOCKS * block_h + (BLOCKS - 1) * BLOCK_GAP;
+      /* Sit at the bottom of the bar so it doesn't jump around when the
+       * icon appears at the top. */
+      const int y0 = r.origin.y + r.size.h - total;
       for (int i = 0; i < BLOCKS; i++) {
         /* Block 0 is the bottom one, so it is lit first as charge rises. */
-        const int by = y0 + (BLOCKS - 1 - i) * (VBLOCK_H + BLOCK_GAP);
-        draw_block(ctx, r.origin.x, by, r.size.w, VBLOCK_H,
+        const int by = y0 + (BLOCKS - 1 - i) * (block_h + BLOCK_GAP);
+        draw_block(ctx, r.origin.x, by, r.size.w, block_h,
                    i < filled, P);
       }
     } else {
-      const int total = BLOCKS * HBLOCK_W + (BLOCKS - 1) * BLOCK_GAP;
-      const int x0 = r.origin.x + (r.size.w - total) / 2;   /* centre */
+      int block_w = (r.size.w - (BLOCKS - 1) * BLOCK_GAP) / BLOCKS;
+      if (block_w > HBLOCK_W) block_w = HBLOCK_W;
+
+      const int total = BLOCKS * block_w + (BLOCKS - 1) * BLOCK_GAP;
+      /* Sit at the right end of the bar so it doesn't jump around when the
+       * icon appears at the left. */
+      const int x0 = r.origin.x + r.size.w - total;
       for (int i = 0; i < BLOCKS; i++) {
-        const int bx = x0 + i * (HBLOCK_W + BLOCK_GAP);
-        draw_block(ctx, bx, r.origin.y, HBLOCK_W, r.size.h,
+        const int bx = x0 + i * (block_w + BLOCK_GAP);
+        draw_block(ctx, bx, r.origin.y, block_w, r.size.h,
                    i < filled, P);
       }
     }
@@ -728,6 +837,59 @@ static void draw_battery(GContext *ctx, const Layout *L, const Palette *P) {
            r.size.w - fill_w, thin);
     }
   }
+}
+
+/* ---------- Bluetooth indicator ---------- */
+
+/*
+ * Draw a Bluetooth symbol with a slash through it ("Bluetooth off") inside
+ * `r`. The symbol is the classic Bluetooth rune, built from five lines
+ * between six points on the edge of the box:
+ *
+ *   T = top centre       U = bottom centre      stem   : T to U
+ *   C = upper right      D = lower left         top arm: T to C, then C to D
+ *   B = lower right      A = upper left         low arm: U to B, then B to A
+ *
+ * The two arms cross over the stem in the middle, which gives the rune its
+ * shape. The slash is then drawn across it, optionally with a channel in
+ * the background color cut around it first (BT_ICON_KNOCKOUT).
+ */
+static void draw_bt_icon(GContext *ctx, GRect r, const Palette *P) {
+  const int x0 = r.origin.x;
+  const int y0 = r.origin.y;
+  const int w  = r.size.w;
+  const int h  = r.size.h;
+
+  const GPoint T = GPoint(x0 + w / 2, y0);                /* top of stem     */
+  const GPoint U = GPoint(x0 + w / 2, y0 + h - 1);        /* bottom of stem  */
+  const GPoint C = GPoint(x0 + w - 1,  y0 + h / 4);       /* upper right     */
+  const GPoint B = GPoint(x0 + w - 1,  y0 + (3 * h) / 4); /* lower right     */
+  const GPoint A = GPoint(x0,          y0 + h / 4);       /* upper left      */
+  const GPoint D = GPoint(x0,          y0 + (3 * h) / 4); /* lower left      */
+
+  graphics_context_set_stroke_color(ctx, P->alert);
+  graphics_context_set_stroke_width(ctx, BT_ICON_STROKE);
+  graphics_draw_line(ctx, T, U);
+  graphics_draw_line(ctx, T, C);
+  graphics_draw_line(ctx, C, D);
+  graphics_draw_line(ctx, U, B);
+  graphics_draw_line(ctx, B, A);
+
+  /* The slash, top-left to bottom-right (it runs a little past the box). */
+  const GPoint s0 = GPoint(x0 - 1,     y0 - 1);
+  const GPoint s1 = GPoint(x0 + w,     y0 + h);
+
+#if BT_ICON_SLASH > 0
+#if BT_ICON_KNOCKOUT > 0
+  graphics_context_set_stroke_color(ctx, P->background);
+  graphics_context_set_stroke_width(ctx, BT_ICON_SLASH + BT_ICON_KNOCKOUT);
+  graphics_draw_line(ctx, s0, s1);
+#endif
+
+  graphics_context_set_stroke_color(ctx, P->alert);
+  graphics_context_set_stroke_width(ctx, BT_ICON_SLASH);
+  graphics_draw_line(ctx, s0, s1);
+#endif
 }
 
 /* ---------- Date ---------- */
@@ -986,6 +1148,11 @@ static void canvas_update(Layer *layer, GContext *ctx) {
   /* Battery (sets its own fill colors internally). */
   draw_battery(ctx, &L, &P);
 
+  /* Bluetooth-disconnected indicator, at the end of the battery bar. */
+  if (L.show_bt) {
+    draw_bt_icon(ctx, L.bt_rect, &P);
+  }
+
   /* Date, in the same color as the digits. */
   if (L.date_vertical) {
     draw_date_vertical(ctx, L.date_rect, P.digits);
@@ -1034,6 +1201,46 @@ static void apply_window_background(void) {
     Palette p;
     palette_get(&p);
     window_set_background_color(s_window, p.background);
+  }
+}
+
+/*
+ * Play a vibration pattern, unless Quiet Time is on. `segments` alternates
+ * vibrate / pause durations in milliseconds, starting with a vibration.
+ */
+static void vibrate(uint32_t *segments, uint32_t count) {
+  if (quiet_time_is_active()) {
+    return;
+  }
+  VibePattern pattern = { .durations = segments, .num_segments = count };
+  vibes_enqueue_custom_pattern(pattern);
+}
+
+/*
+ * Called by the system when the connection to the phone is made or lost.
+ * It only fires on a change, so we never vibrate for a state we were
+ * already in (and not at all when the watchface is first loaded while
+ * disconnected; the indicator just appears).
+ */
+static void connection_handler(bool connected) {
+  static uint32_t lost_pattern[]     = BT_VIBE_DISCONNECT_PATTERN;
+  static uint32_t restored_pattern[] = BT_VIBE_RECONNECT_PATTERN;
+
+  const bool changed = (connected != s_bt_connected);
+  s_bt_connected = connected;
+
+  if (changed) {
+    if (!connected && s_settings.bt_vibrate != BT_VIBE_OFF) {
+      vibrate(lost_pattern, sizeof(lost_pattern) / sizeof(lost_pattern[0]));
+    } else if (connected && s_settings.bt_vibrate == BT_VIBE_BOTH) {
+      vibrate(restored_pattern,
+              sizeof(restored_pattern) / sizeof(restored_pattern[0]));
+    }
+  }
+
+  /* Redraw either way: the icon appears/disappears and the bar resizes. */
+  if (s_canvas) {
+    layer_mark_dirty(s_canvas);
   }
 }
 
@@ -1093,6 +1300,12 @@ static void inbox_received(DictionaryIterator *iter, void *context) {
                                                                : DATE_FORMAT_TEXT;
   }
 
+  if ((t = dict_find(iter, MESSAGE_KEY_BtVibrate))) {
+    int v = tuple_to_int(t);
+    s_settings.bt_vibrate = (v >= 0 && v < BT_VIBE_COUNT) ? (uint8_t)v
+                                                          : BT_VIBE_DISCONNECT;
+  }
+
   settings_save();
   apply_window_background();
   if (s_canvas) {
@@ -1147,6 +1360,13 @@ static void init(void) {
   tick_timer_service_subscribe(MINUTE_UNIT, tick_handler);
   battery_state_service_subscribe(battery_handler);
 
+  /* Find out the current connection state without vibrating, then listen
+   * for changes. */
+  s_bt_connected = connection_service_peek_pebble_app_connection();
+  connection_service_subscribe((ConnectionHandlers) {
+    .pebble_app_connection_handler = connection_handler,
+  });
+
   /* Receive settings from the phone. Small buffers are plenty. */
   app_message_register_inbox_received(inbox_received);
   app_message_open(128, 128);
@@ -1155,6 +1375,7 @@ static void init(void) {
 static void deinit(void) {
   tick_timer_service_unsubscribe();
   battery_state_service_unsubscribe();
+  connection_service_unsubscribe();
   window_destroy(s_window);
 #if DATE_USE_CUSTOM_FONT
   fonts_unload_custom_font(s_date_font);
