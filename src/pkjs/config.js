@@ -17,7 +17,7 @@ module.exports = [
         "type": "select",
         "messageKey": "Layout",
         "label": "Arrangement",
-        "defaultValue": "0",
+        "defaultValue": "1",
         "options": [
           { "label": "Battery under time, date at bottom", "value": "0" },
           { "label": "Vertical battery bar at right",      "value": "1" },
@@ -49,14 +49,14 @@ module.exports = [
         "messageKey": "DigitGaps",
         "label": "Gaps between digit segments",
         "description": "Pointed, LCD-style segments with small gaps.",
-        "defaultValue": false
+        "defaultValue": true
       },
       {
         "type": "toggle",
         "messageKey": "SegmentedBattery",
         "label": "Segmented battery bar",
         "description": "10 blocks, each full or hollow, in 10% steps.",
-        "defaultValue": false
+        "defaultValue": true
       }
     ]
   },
