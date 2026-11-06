@@ -23,6 +23,17 @@ module.exports = [
           { "label": "Vertical battery bar at right",      "value": "1" },
           { "label": "Vertical bar and vertical date",     "value": "2" }
         ]
+      },
+      {
+        "type": "select",
+        "messageKey": "DateFormat",
+        "label": "Date format",
+        "description": "Numeric shows day | month | year with bars between the fields.",
+        "defaultValue": "0",
+        "options": [
+          { "label": "Text (Fri Nov 06)",       "value": "0" },
+          { "label": "Numeric (06 | 11 | 26)",  "value": "1" }
+        ]
       }
     ]
   },

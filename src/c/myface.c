@@ -7,7 +7,8 @@
  * WHAT IT DRAWS
  *   - The time as two rows of huge seven-segment digits (HH over MM).
  *   - A battery bar.
- *   - The date (e.g. "Fri Nov 06").
+ *   - The date, either as text ("Fri Nov 06") or numerically with bars
+ *     between the fields ("06 | 11 | 26", i.e. dd | mm | yy).
  *
  * USER SETTINGS (edited on the phone with Clay, stored on the watch)
  *   1. Color scheme       : Standard (white on black, color-coded battery),
@@ -18,6 +19,37 @@
  *                           instead of solid, merged bars.
  *   3. Segmented battery  : 10 full/hollow blocks instead of a smooth bar.
  *   4. Layout             : where the battery and date go (see below).
+ *   5. Date format        : text ("Fri Nov 06") or numeric ("06 | 11 | 26").
+ *                           In the numeric format the fields are separated
+ *                           by vertical bars when the date is horizontal,
+ *                           and by horizontal bars when it is vertical.
+ *
+ * QUICK TWEAK GUIDE
+ *   Everything below is a #define in section 1. Edit, rebuild, repeat.
+ *
+ *   Date text size / font
+ *     Horizontal date ........ DATE_FONT_KEY, DATE_FONT_Y_NUDGE,
+ *                              DATE_FALLBACK_FONT_KEY, DATE_FALLBACK_Y_NUDGE
+ *     Vertical date, text .... VDATE_FONT_KEY, VDATE_PITCH,
+ *                              VDATE_GROUP_GAP, VDATE_NUDGE
+ *     Vertical date, numeric . VDATE_NUM_FONT_KEY, VDATE_NUM_PITCH,
+ *                              VDATE_NUM_GAP, VDATE_NUM_NUDGE
+ *     Width of vertical date column ... SBV_DATE_COL_W
+ *   Numeric-date separator bars
+ *     Horizontal date ........ DATE_SEP_THICK, DATE_SEP_LEN, DATE_SEP_PAD,
+ *                              DATE_SEP_Y_NUDGE
+ *     Vertical date .......... DATE_SEP_THICK, VDATE_SEP_LEN
+ *   Battery bar
+ *     Width of vertical bar .. VBAR_W   (digits resize themselves to suit)
+ *     Height of horizontal bar BAR_THICK
+ *     Gap between digits and bar ... BAR_GAP
+ *     Bar length (vertical) .. VBAR_MARGIN_Y (smaller = longer bar)
+ *     Segmented blocks ....... VBLOCK_H, HBLOCK_W, BLOCK_GAP, BLOCK_BORDER
+ *     Thin "used" line ....... BAR_THIN, BAR_THIN_HC
+ *   Time digits
+ *     Standard layout ........ STD_*      Side-bar layout ... SB_*
+ *     Vertical-date layout ... SBV_*
+ *   Default settings ......... settings_load() in section 2
  *
  * LAYOUTS
  *   LAYOUT_STANDARD
@@ -58,6 +90,13 @@ enum {
   LAYOUT_COUNT                 /* number of layouts; used for range checks   */
 };
 
+/* ---- Date format identifiers (stored in the settings; keep stable) ---- */
+enum {
+  DATE_FORMAT_TEXT     = 0,  /* "Fri Nov 06"                                 */
+  DATE_FORMAT_NUMERIC  = 1,  /* "06 | 11 | 26"  (day | month | 2-digit year) */
+  DATE_FORMAT_COUNT          /* number of formats; used for range checks     */
+};
+
 /* ---- Color scheme identifiers (stored in the settings; keep stable) ---- */
 enum {
   SCHEME_STANDARD       = 0,  /* white on black, color-coded battery         */
@@ -82,7 +121,7 @@ enum {
 /* ---- STANDARD layout: digits ---- */
 #define STD_DIGIT_W     64   /* width of one digit in pixels                 */
 #define STD_DIGIT_H     60   /* height of one digit in pixels                */
-#define STD_SEG_T        9   /* segment thickness: bigger = bolder digits    */
+#define STD_SEG_T       10   /* segment thickness: bigger = bolder digits    */
 #define STD_DIGIT_GAP    8   /* horizontal space between the two digits      */
 #define STD_ROW1_Y       2   /* top of the hours row                         */
 #define STD_ROW2_Y      66   /* top of the minutes row (2 + 60 + 4 gap)      */
@@ -94,6 +133,67 @@ enum {
 /* ---- Horizontal date (STANDARD and SIDE_BAR layouts) ---- */
 #define DATE_Y          138  /* top of the date text box                     */
 #define DATE_H           30  /* height of the date text box                  */
+
+/* ---- Date font (horizontal date: STANDARD and SIDE_BAR layouts) ----
+ *
+ * The date is drawn in DATE_FONT_KEY if it fits the space available, and in
+ * DATE_FALLBACK_FONT_KEY if it doesn't, so it is never cut off.
+ *
+ * To try another system font, change DATE_FONT_KEY. Samples of every font
+ * are at https://developer.repebble.com/guides/app-resources/system-fonts/
+ * Only fonts that contain LETTERS will work: the "NUMBERS" fonts (LECO,
+ * BITHAM_xx_MEDIUM_NUMBERS) and ROBOTO_BOLD_SUBSET_49 only have digits.
+ * Candidates with letters: FONT_KEY_GOTHIC_14/18/24/28 (each also _BOLD),
+ * FONT_KEY_ROBOTO_CONDENSED_21, FONT_KEY_DROID_SERIF_28_BOLD,
+ * FONT_KEY_BITHAM_30_BLACK.
+ *
+ * Fonts differ in how much blank space they leave above the letters, so
+ * each has a *_Y_NUDGE: positive moves the text down, negative moves it up.
+ */
+/* #define DATE_FONT_KEY           FONT_KEY_GOTHIC_24_BOLD */
+#define DATE_FONT_KEY           FONT_KEY_GOTHIC_28_BOLD
+#define DATE_FONT_Y_NUDGE        0
+#define DATE_FALLBACK_FONT_KEY  FONT_KEY_BITHAM_30_BLACK
+/* #define DATE_FALLBACK_FONT_KEY  FONT_KEY_GOTHIC_18_BOLD */
+#define DATE_FALLBACK_Y_NUDGE    4
+
+/*
+ * Optional: use a custom TrueType font for the date instead of
+ * DATE_FONT_KEY, for example a 14-segment LCD font such as DSEG14 to match
+ * the digits. Leave this at 0 until you have added the font file and the
+ * resource entry to package.json (see the instructions that came with this
+ * file); with 0, none of the custom-font code is compiled.
+ *
+ *   DATE_CUSTOM_FONT_RES   : RESOURCE_ID_ + the "name" in package.json
+ *   DATE_CUSTOM_Y_NUDGE    : vertical adjustment for this font
+ *   DATE_CUSTOM_UPPERCASE  : 1 = draw the date in capitals (segment fonts
+ *                            usually look best, and are safest, in capitals)
+ */
+#define DATE_USE_CUSTOM_FONT     0
+#define DATE_CUSTOM_FONT_RES     RESOURCE_ID_FONT_DSEG14_20
+#define DATE_CUSTOM_Y_NUDGE      0
+#define DATE_CUSTOM_UPPERCASE    1
+
+/*
+ * ---- Numeric date: separator bars ----
+ * In the numeric format ("06 | 11 | 26") the separators are drawn as filled
+ * rectangles rather than "|" characters, so their size is fully adjustable
+ * and doesn't depend on the font containing that symbol.
+ *
+ * Horizontal date: each separator is a vertical bar DATE_SEP_THICK wide and
+ * DATE_SEP_LEN tall, with DATE_SEP_PAD pixels of space on either side.
+ * Vertical date: each separator is a horizontal bar DATE_SEP_THICK tall and
+ * VDATE_SEP_LEN wide, centred in the gap between the groups.
+ */
+#define DATE_SEP_THICK      1  /* thickness of a separator bar, both ways    */
+#define DATE_SEP_LEN       20  /* length (height) of a separator in the
+                                  horizontal date                            */
+#define DATE_SEP_PAD        5  /* blank space each side of a separator in the
+                                  horizontal date                            */
+#define DATE_SEP_Y_NUDGE   +5  /* move horizontal-date separators down (+) or
+                                  up (-) relative to the digits              */
+#define VDATE_SEP_LEN      12  /* length (width) of a separator in the
+                                  vertical date                              */
 
 /* ---- Vertical battery bar (both side-bar layouts) ---- */
 #define VBAR_W           10  /* thickness of the bar                         */
@@ -119,12 +219,32 @@ enum {
 #define SBV_DATE_COL_W   20  /* width of the vertical date column            */
 #define SBV_DATE_GAP      3  /* gap between the bar and the date column      */
 
-/* ---- Vertical date text (SIDE_BAR_VDATE layout) ---- */
+/*
+ * ---- Vertical date, text format (SIDE_BAR_VDATE layout): F r i / N o v / 0 7
+ * One character is drawn per line. PITCH is the distance from one character
+ * to the next, so it controls how tightly the stack is packed; the font
+ * controls how big each character is. Keep the characters narrower than
+ * SBV_DATE_COL_W.
+ */
+#define VDATE_FONT_KEY   FONT_KEY_GOTHIC_18_BOLD
 #define VDATE_PITCH      17  /* vertical distance from one character to the
                                 next                                         */
 #define VDATE_GROUP_GAP   9  /* extra blank space between Fri / Nov / 07     */
 #define VDATE_NUDGE       3  /* pulls glyphs up: Pebble fonts leave a few
                                 pixels of empty space above the letters      */
+
+/*
+ * ---- Vertical date, numeric format: 0 6 / 1 1 / 2 6 ----
+ * Only six characters, so they can be bigger than the text format's. The
+ * GAP is the space between groups; a separator bar is drawn in the middle
+ * of each gap. Stack height = 6 * PITCH + 2 * GAP, which must be at most
+ * the screen height (168).
+ */
+#define VDATE_NUM_FONT_KEY  FONT_KEY_GOTHIC_28_BOLD
+#define VDATE_NUM_PITCH     22  /* distance from one digit to the next       */
+#define VDATE_NUM_GAP       14  /* space between dd / mm / yy (holds the bar)*/
+#define VDATE_NUM_NUDGE     8   /* lifts digits to cancel the font's top
+                                   padding; raise it to move digits up       */
 
 /* ---- Battery bar styling ---- */
 #define BAR_THICK        10  /* horizontal bar height (vertical bar width is
@@ -142,7 +262,7 @@ enum {
 #define BLOCK_BORDER      2  /* outline thickness of a hollow block          */
 
 /* ---- Persistent storage key ---- */
-#define SETTINGS_KEY      3  /* bumped because the settings struct changed   */
+#define SETTINGS_KEY      4  /* bumped because the settings struct changed   */
 
 /* ======================================================================
  * 2. SETTINGS
@@ -157,6 +277,7 @@ typedef struct {
   bool    digit_gaps;         /* LCD-style segments with gaps                */
   bool    segmented_battery;  /* 10 blocks instead of a smooth bar           */
   uint8_t layout;             /* one of the LAYOUT_* values                  */
+  uint8_t date_format;        /* one of the DATE_FORMAT_* values             */
 } Settings;
 
 static Settings s_settings;
@@ -169,14 +290,16 @@ static Settings s_settings;
 static void settings_load(void) {
   /* Defaults first, so any field not loaded below has a sane value. */
   s_settings = (Settings){
-    /* .color_scheme      = SCHEME_STANDARD, */
+    .color_scheme      = SCHEME_STANDARD,
     /* .color_scheme      = SCHEME_HIGH_CONTRAST, */
-    .color_scheme      = SCHEME_LCD,
+    /* .color_scheme      = SCHEME_LCD, */
     .digit_gaps        = true,
     .segmented_battery = true,
     /* .layout            = LAYOUT_STANDARD, */
-    .layout            = LAYOUT_SIDE_BAR,
-    /* .layout            = LAYOUT_SIDE_BAR_VDATE, */
+    /* .layout            = LAYOUT_SIDE_BAR, */
+    .layout            = LAYOUT_SIDE_BAR_VDATE,
+    /* .date_format       = DATE_FORMAT_TEXT, */
+    .date_format       = DATE_FORMAT_NUMERIC,
   };
 
   if (persist_exists(SETTINGS_KEY) &&
@@ -191,6 +314,9 @@ static void settings_load(void) {
   if (s_settings.color_scheme >= (uint8_t)SCHEME_COUNT) {
     s_settings.color_scheme = SCHEME_STANDARD;
   }
+  if (s_settings.date_format >= (uint8_t)DATE_FORMAT_COUNT) {
+    s_settings.date_format = DATE_FORMAT_TEXT;
+  }
 }
 
 static void settings_save(void) {
@@ -204,6 +330,9 @@ static void settings_save(void) {
 static Window *s_window;   /* the watchface window                           */
 static Layer  *s_canvas;   /* full-screen layer; everything is drawn on it   */
 
+static GFont s_date_font;          /* font for the horizontal date (see
+                                      DATE_FONT_KEY / DATE_USE_CUSTOM_FONT)  */
+
 static int s_hour, s_min;          /* time to display (hour already 12/24h)  */
 static int s_battery = 100;        /* battery charge, 0-100                  */
 
@@ -213,6 +342,8 @@ static int s_battery = 100;        /* battery charge, 0-100                  */
 static char s_dow[8];              /* day of week, e.g. "Fri"                */
 static char s_mon[8];              /* month, e.g. "Nov"                      */
 static char s_dom[4];              /* day of month, e.g. "07"                */
+static char s_mon_num[4];          /* month as a number, e.g. "11"           */
+static char s_yr[4];               /* two-digit year, e.g. "26"              */
 static char s_date_full[24];       /* "Fri Nov 07"                           */
 
 /*
@@ -601,81 +732,223 @@ static void draw_battery(GContext *ctx, const Layout *L, const Palette *P) {
 
 /* ---------- Date ---------- */
 
-/*
- * Draw the date on one line, e.g. "Fri Nov 07".
- * It prefers the big bold font. If the text would be wider than the box
- * (possible in the side-bar layout with a long name like "Wed Sep 30"),
- * it falls back to the next size down so nothing is cut off.
- */
-static void draw_date_horizontal(GContext *ctx, GRect area, GColor color) {
-  GFont font = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
-  int y_nudge = 0;
-
-  /* Measure the text in the big font (the 1000-px-wide box just means
-   * "don't wrap while measuring"). */
+/* Width in pixels of `text` drawn on one line in `font`. (The 1000-px-wide
+ * measuring box just means "don't wrap while measuring".) */
+static int text_width(const char *text, GFont font) {
   GSize size = graphics_text_layout_get_content_size(
-      s_date_full, font, GRect(0, 0, 1000, 40),
+      text, font, GRect(0, 0, 1000, 100),
       GTextOverflowModeWordWrap, GTextAlignmentLeft);
+  return size.w;
+}
 
-  if (size.w > area.size.w) {
-    font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
-    y_nudge = 4;   /* the smaller font sits higher in its box; drop it */
+#if DATE_USE_CUSTOM_FONT && DATE_CUSTOM_UPPERCASE
+/* Convert a string to capitals in place (ASCII letters only). */
+static void uppercase(char *str) {
+  for (; *str != '\0'; str++) {
+    if (*str >= 'a' && *str <= 'z') {
+      *str = (char)(*str - 'a' + 'A');
+    }
+  }
+}
+#endif
+
+/*
+ * Draw the text-format date on one line, e.g. "Fri Nov 07".
+ * It prefers the font chosen by DATE_FONT_KEY (or the custom font). If the
+ * text would be wider than the box (possible in the side-bar layout with a
+ * long name like "Wed Sep 30"), it falls back to DATE_FALLBACK_FONT_KEY so
+ * nothing is cut off. Note that this means the date can change size from
+ * day to day if the preferred font only just fits.
+ */
+static void draw_date_text_horizontal(GContext *ctx, GRect area, GColor color) {
+  const char *text = s_date_full;
+  GFont font = s_date_font;
+
+#if DATE_USE_CUSTOM_FONT
+  int y_nudge = DATE_CUSTOM_Y_NUDGE;
+#else
+  int y_nudge = DATE_FONT_Y_NUDGE;
+#endif
+
+#if DATE_USE_CUSTOM_FONT && DATE_CUSTOM_UPPERCASE
+  char caps[sizeof(s_date_full)];
+  snprintf(caps, sizeof(caps), "%s", s_date_full);
+  uppercase(caps);
+  text = caps;
+#endif
+
+  if (text_width(text, font) > area.size.w) {
+    /* Too wide: switch to the fallback font, which is always a system
+     * font, and use the date exactly as written (not in capitals). */
+    text = s_date_full;
+    font = fonts_get_system_font(DATE_FALLBACK_FONT_KEY);
+    y_nudge = DATE_FALLBACK_Y_NUDGE;
   }
 
   area.origin.y += y_nudge;
   graphics_context_set_text_color(ctx, color);
-  graphics_draw_text(ctx, s_date_full, font, area,
+  graphics_draw_text(ctx, text, font, area,
                      GTextOverflowModeTrailingEllipsis,
                      GTextAlignmentCenter, NULL);
 }
 
 /*
- * Draw the date vertically, one upright character per line, with a blank
- * gap between groups:
+ * Draw the numeric date on one line with vertical bars between the fields:
  *
- *     F
- *     r
- *     i
+ *     06 | 11 | 26      (day | month | two-digit year)
  *
- *     N
- *     o
- *     v
+ * The three fields are drawn as separate pieces of text, with the bars
+ * drawn as filled rectangles between them. The whole group is centred in
+ * `area`. As with the text format, if everything would be wider than the
+ * area it switches to the fallback font.
+ */
+static void draw_date_numeric_horizontal(GContext *ctx, GRect area,
+                                         GColor color) {
+  const char *fields[3] = { s_dom, s_mon_num, s_yr };
+  GFont font = s_date_font;
+
+#if DATE_USE_CUSTOM_FONT
+  int y_nudge = DATE_CUSTOM_Y_NUDGE;
+#else
+  int y_nudge = DATE_FONT_Y_NUDGE;
+#endif
+
+  /* Width of the two separators together, including the padding. */
+  const int sep_total = 2 * (2 * DATE_SEP_PAD + DATE_SEP_THICK);
+  int widths[3];
+  int total = 0;
+
+  /* Measure; if too wide for the area, measure again in the fallback. */
+  for (int attempt = 0; attempt < 2; attempt++) {
+    total = sep_total;
+    for (int i = 0; i < 3; i++) {
+      widths[i] = text_width(fields[i], font);
+      total += widths[i];
+    }
+    if (total <= area.size.w || attempt == 1) {
+      break;
+    }
+    font = fonts_get_system_font(DATE_FALLBACK_FONT_KEY);
+    y_nudge = DATE_FALLBACK_Y_NUDGE;
+  }
+
+  graphics_context_set_text_color(ctx, color);
+  graphics_context_set_fill_color(ctx, color);
+
+  const int text_y = area.origin.y + y_nudge;
+  /* Separators are centred vertically in the area, then follow the text's
+   * nudge so they stay level with the digits if the font changes. */
+  const int bar_y = area.origin.y + (area.size.h - DATE_SEP_LEN) / 2
+                    + y_nudge + DATE_SEP_Y_NUDGE;
+
+  int x = area.origin.x + (area.size.w - total) / 2;   /* centre the group */
+
+  for (int i = 0; i < 3; i++) {
+    /* Draw the field centred in a box a little wider than the measured
+     * text, so rounding never clips a glyph or triggers an ellipsis. */
+    graphics_draw_text(ctx, fields[i], font,
+                       GRect(x - 2, text_y, widths[i] + 4, area.size.h),
+                       GTextOverflowModeTrailingEllipsis,
+                       GTextAlignmentCenter, NULL);
+    x += widths[i];
+
+    if (i < 2) {
+      x += DATE_SEP_PAD;
+      fill(ctx, x, bar_y, DATE_SEP_THICK, DATE_SEP_LEN);
+      x += DATE_SEP_THICK + DATE_SEP_PAD;
+    }
+  }
+}
+
+/* Draw the horizontal date in whichever format is selected. */
+static void draw_date_horizontal(GContext *ctx, GRect area, GColor color) {
+  if (s_settings.date_format == DATE_FORMAT_NUMERIC) {
+    draw_date_numeric_horizontal(ctx, area, color);
+  } else {
+    draw_date_text_horizontal(ctx, area, color);
+  }
+}
+
+/*
+ * Draw the date vertically, one upright character per line, in groups.
  *
+ *   Text format             Numeric format (dd / mm / yy)
+ *
+ *     F                       0
+ *     r                       6
+ *     i                      ---
+ *                             1
+ *     N                       1
+ *     o                      ---
+ *     v                       2
+ *                             6
  *     0
  *     7
  *
+ * In the text format the groups are separated by blank space; in the numeric
+ * format by a short horizontal bar (the vertical counterpart of the "|"
+ * used when the date is horizontal).
+ *
  * Each character is drawn separately (rather than as one multi-line text
- * block) so that the line spacing is exactly VDATE_PITCH and the group gaps
- * are exactly VDATE_GROUP_GAP, and the whole stack can be centred
- * vertically in the column.
+ * block) so that the line spacing is exactly the PITCH and the group gaps
+ * are exactly the GAP, and the whole stack can be centred vertically in the
+ * column. The font, pitch, gap and nudge come from the VDATE_* constants
+ * for the selected format.
  */
 static void draw_date_vertical(GContext *ctx, GRect col, GColor color) {
-  const char *groups[3] = { s_dow, s_mon, s_dom };
-  GFont font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  const bool numeric = (s_settings.date_format == DATE_FORMAT_NUMERIC);
 
-  /* Count characters so the stack can be centred. */
+  /* Pick the three groups of characters and the metrics for this format. */
+  const char *groups[3];
+  GFont font;
+  int pitch, gap, nudge;
+
+  if (numeric) {
+    groups[0] = s_dom;      groups[1] = s_mon_num;   groups[2] = s_yr;
+    font  = fonts_get_system_font(VDATE_NUM_FONT_KEY);
+    pitch = VDATE_NUM_PITCH;
+    gap   = VDATE_NUM_GAP;
+    nudge = VDATE_NUM_NUDGE;
+  } else {
+    groups[0] = s_dow;      groups[1] = s_mon;       groups[2] = s_dom;
+    font  = fonts_get_system_font(VDATE_FONT_KEY);
+    pitch = VDATE_PITCH;
+    gap   = VDATE_GROUP_GAP;
+    nudge = VDATE_NUDGE;
+  }
+
+  /* Count characters so the whole stack can be centred vertically. */
   int chars = 0;
   for (int g = 0; g < 3; g++) {
     chars += (int)strlen(groups[g]);
   }
-  const int total = chars * VDATE_PITCH + 2 * VDATE_GROUP_GAP;
+  const int total = chars * pitch + 2 * gap;
   int y = col.origin.y + (col.size.h - total) / 2;
 
   graphics_context_set_text_color(ctx, color);
+  graphics_context_set_fill_color(ctx, color);   /* for the separator bars */
 
   for (int g = 0; g < 3; g++) {
     for (const char *p = groups[g]; *p != '\0'; p++) {
       char one[2] = { *p, '\0' };   /* a one-character string */
       /* The box is taller than one line so glyphs are never clipped;
-       * VDATE_NUDGE lifts the letters to cancel the font's top padding. */
+       * the nudge lifts the characters to cancel the font's top padding. */
       graphics_draw_text(ctx, one, font,
-                         GRect(col.origin.x, y - VDATE_NUDGE,
-                               col.size.w, VDATE_PITCH + 8),
+                         GRect(col.origin.x, y - nudge, col.size.w, pitch + 12),
                          GTextOverflowModeTrailingEllipsis,
                          GTextAlignmentCenter, NULL);
-      y += VDATE_PITCH;
+      y += pitch;
     }
-    y += VDATE_GROUP_GAP;   /* blank gap before the next group */
+
+    if (g < 2) {
+      /* Between groups: a horizontal bar centred in the gap (numeric
+       * format only; the text format just leaves the gap blank). */
+      if (numeric) {
+        fill(ctx, col.origin.x + (col.size.w - VDATE_SEP_LEN) / 2,
+             y + (gap - DATE_SEP_THICK) / 2, VDATE_SEP_LEN, DATE_SEP_THICK);
+      }
+      y += gap;
+    }
   }
 }
 
@@ -741,6 +1014,8 @@ static void update_time(void) {
   strftime(s_dow, sizeof(s_dow), "%a", t);   /* Fri */
   strftime(s_mon, sizeof(s_mon), "%b", t);   /* Nov */
   strftime(s_dom, sizeof(s_dom), "%d", t);   /* 07  */
+  strftime(s_mon_num, sizeof(s_mon_num), "%m", t);   /* 11 */
+  strftime(s_yr, sizeof(s_yr), "%y", t);             /* 26 */
   snprintf(s_date_full, sizeof(s_date_full), "%s %s %s",
            s_dow, s_mon, s_dom);
 
@@ -812,6 +1087,12 @@ static void inbox_received(DictionaryIterator *iter, void *context) {
                                                      : LAYOUT_STANDARD;
   }
 
+  if ((t = dict_find(iter, MESSAGE_KEY_DateFormat))) {
+    int v = tuple_to_int(t);
+    s_settings.date_format = (v >= 0 && v < DATE_FORMAT_COUNT) ? (uint8_t)v
+                                                               : DATE_FORMAT_TEXT;
+  }
+
   settings_save();
   apply_window_background();
   if (s_canvas) {
@@ -846,6 +1127,15 @@ static void window_unload(Window *window) {
 static void init(void) {
   settings_load();
 
+  /* Load the date font. System fonts need no cleanup; a custom font is
+   * loaded from the app's resources and must be unloaded in deinit(). */
+#if DATE_USE_CUSTOM_FONT
+  s_date_font = fonts_load_custom_font(
+      resource_get_handle(DATE_CUSTOM_FONT_RES));
+#else
+  s_date_font = fonts_get_system_font(DATE_FONT_KEY);
+#endif
+
   s_window = window_create();
   window_set_window_handlers(s_window, (WindowHandlers) {
     .load   = window_load,
@@ -866,6 +1156,9 @@ static void deinit(void) {
   tick_timer_service_unsubscribe();
   battery_state_service_unsubscribe();
   window_destroy(s_window);
+#if DATE_USE_CUSTOM_FONT
+  fonts_unload_custom_font(s_date_font);
+#endif
 }
 
 int main(void) {

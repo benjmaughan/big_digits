@@ -15,7 +15,7 @@
         "sdkVersion": "3",
         "enableMultiJS": true,
         "capabilities": ["configurable"],
-        "messageKeys": ["ColorScheme", "DigitGaps", "SegmentedBattery", "Layout"],
+        "messageKeys": ["ColorScheme", "DigitGaps", "SegmentedBattery", "Layout", "DateFormat"],
         "targetPlatforms": [
             "basalt"
         ],
