@@ -114,6 +114,20 @@ Other easy changes:
 
 Digits are rendered with a custom `Layer` update procedure. Each digit is a seven-segment pattern (`SEGMENTS[]` bitmask table) drawn with `graphics_fill_rect`. A minute tick timer updates the time and date, and a battery state subscription updates the bar. The layout is hard-coded for the 144×168 Pebble Time screen, so the project targets `basalt` only.
 
+## Settings
+
+Open the watchface's settings from the Pebble phone app (gear icon). Options:
+
+| Setting | Effect |
+|---|---|
+| High contrast | Pure white on black, no color-coded battery, thicker battery line |
+| Gaps between digit segments | Draws each digit segment separately, LCD-style |
+| Segmented battery bar | Battery shown as 10 blocks, full or hollow, in 10% steps |
+
+Settings are built with [Clay](https://github.com/pebble/clay) and saved on the watch.
+To preview the settings page in the emulator: `pebble emu-app-config
+--emulator basalt`
+
 ## License
 
 Choose a license for your repo (for example MIT) and add a `LICENSE` file.

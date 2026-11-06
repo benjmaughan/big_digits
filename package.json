@@ -1,32 +1,29 @@
 {
-  "name": "myface",
-  "author": "MakeAwesomeHappen",
-  "version": "1.0.0",
-  "keywords": ["pebble-app"],
-  "private": true,
-  "dependencies": {},
-  "pebble": {
-    "displayName": "myface",
-    "uuid": "77ccb4f5-7929-4060-bb87-ee9178c62560",
-    "sdkVersion": "3",
-    "enableMultiJS": true,
-    "targetPlatforms": [
-      "aplite",
-      "basalt",
-      "chalk",
-      "diorite",
-      "emery",
-      "flint",
-      "gabbro"
+    "name": "myface",
+    "author": "MakeAwesomeHappen",
+    "version": "1.0.0",
+    "keywords": [
+        "pebble-app"
     ],
-    "watchapp": {
-      "watchface": true
+    "private": true,
+    "dependencies": {
+        "pebble-clay": "^1.0.4"
     },
-    "messageKeys": [
-      "dummy"
-    ],
-    "resources": {
-      "media": []
+    "pebble": {
+        "displayName": "myface",
+        "uuid": "77ccb4f5-7929-4060-bb87-ee9178c62560",
+        "sdkVersion": "3",
+        "enableMultiJS": true,
+        "capabilities": ["configurable"],
+        "messageKeys": ["HighContrast", "DigitGaps", "SegmentedBattery"],
+        "targetPlatforms": [
+            "basalt"
+        ],
+        "watchapp": {
+            "watchface": true
+        },
+        "resources": {
+            "media": []
+        }
     }
-  }
 }
