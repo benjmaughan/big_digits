@@ -72,6 +72,28 @@ module.exports = [
     ]
   },
 
+  /* ---- Phone battery ---- */
+  {
+    "type": "section",
+    "items": [
+      { "type": "heading", "defaultValue": "Phone battery" },
+      {
+        "type": "toggle",
+        "messageKey": "PhoneBattery",
+        "label": "Show phone battery bar",
+        "description": "A thinner bar beside the watch battery bar (below it, or to its right). Hidden while the phone is disconnected or if the phone app doesn't report its battery level.",
+        "defaultValue": true
+      },
+      {
+        "type": "toggle",
+        "messageKey": "PhoneSegmented",
+        "label": "Segmented phone battery bar",
+        "description": "10 blocks, each full or hollow, in 10% steps.",
+        "defaultValue": true
+      }
+    ]
+  },
+
   /* ---- Bluetooth ---- */
   {
     "type": "section",
