@@ -58,6 +58,8 @@
  *   Phone battery bar
  *     Thickness / gap ........ WATCH_BAR_THICK_DUAL, PHONE_BAR_THICK,
  *                              PHONE_BAR_GAP (digits resize to suit)
+ *     Colors (Standard) ...... PHONE_COLOR_HIGH, PHONE_COLOR_MID,
+ *                              PHONE_COLOR_LOW
  *   Time digits
  *     Standard layout ........ STD_*      Side-bar layout ... SB_*
  *     Vertical-date layout ... SBV_*
@@ -341,6 +343,13 @@ enum {
 #define PHONE_BAR_THICK       6  /* thickness of the phone bar               */
 #define PHONE_BAR_GAP         2  /* space between the watch bar and phone bar*/
 #define DUAL_BAR_THICK  (WATCH_BAR_THICK_DUAL + PHONE_BAR_GAP + PHONE_BAR_THICK)
+
+/* Phone bar colors in the Standard scheme (same thresholds as the watch
+ * bar). Any of the 64 Pebble Time colors can be used, e.g. GColorPictonBlue,
+ * GColorCyan, GColorVividViolet, GColorMagenta, GColorChromeYellow. */
+#define PHONE_COLOR_HIGH  GColorVividCerulean  /* above 40%                  */
+#define PHONE_COLOR_MID   GColorOrange         /* 21-40%                     */
+#define PHONE_COLOR_LOW   GColorRed            /* 20% and below              */
 
 /* ---- Persistent storage key ---- */
 #define SETTINGS_KEY      5  /* change only if existing fields are reordered
@@ -802,13 +811,21 @@ typedef struct {
  * battery are the same color; they are told apart by thickness (thick bar
  * vs. thin line) or by solid vs. hollow blocks.
  *
- * The phone bar follows the same rules, color-coded by the phone's own
- * charge.
+ * In the Standard scheme the phone bar has its own colors, so it can't be
+ * mistaken for the watch bar: blue above 40%, orange 21-40%, and red at 20%
+ * and below (red is kept so a nearly flat phone still looks urgent). In the
+ * single-color schemes it matches the watch bar.
  */
 static GColor level_color(int percent) {
   return (percent > 40) ? GColorGreen
        : (percent > 20) ? GColorYellow
        :                  GColorRed;
+}
+
+static GColor phone_level_color(int percent) {
+  return (percent > 40) ? PHONE_COLOR_HIGH
+       : (percent > 20) ? PHONE_COLOR_MID
+       :                  PHONE_COLOR_LOW;
 }
 
 static void palette_get(Palette *p) {
@@ -836,7 +853,7 @@ static void palette_get(Palette *p) {
       p->background = GColorBlack;
       p->digits     = GColorWhite;
       p->bar_on     = level_color(s_battery);
-      p->phone_on   = level_color(s_phone_battery);
+      p->phone_on   = phone_level_color(s_phone_battery);
       p->bar_off    = GColorLightGray;
       p->alert      = GColorRed;
       break;
