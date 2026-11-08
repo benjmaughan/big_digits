@@ -18,7 +18,7 @@ A watchface for the original **Pebble Time** (`basalt` platform, 144×168 color)
   - Green above 40%
   - Yellow 21–40%
   - Red 20% and below
-- **Phone battery bar (optional).** A second, thinner bar beside the watch battery bar (below it, or to its right on the vertical layouts) shows the phone's charge. The two bars share the space of the single bar. It can be continuous or segmented independently of the watch bar, or turned off in the settings. The level comes from the phone app's JavaScript Battery Status API (`navigator.getBattery`); if the phone app doesn't provide it, or the phone is disconnected, the phone bar is hidden and the watch bar returns to full thickness.
+- **Phone battery bar (optional).** A second, thinner bar beside the watch battery bar (below it, or to its right on the vertical layouts) shows the phone's charge. Each bar is 6 px thick, and the time digits shrink slightly to make room; the date keeps its size. In the Standard scheme it has its own colours (blue above 40%, orange 21–40%, red 20% and below) so it can't be confused with the watch bar. It can be continuous or segmented independently of the watch bar, or turned off in the settings. The level comes from the phone app's JavaScript Battery Status API (`navigator.getBattery`); if the phone app doesn't provide it, or the phone is disconnected, the phone bar is hidden and the watch bar fills the whole space.
 - **Date line.** Day, month and date in Gothic 24 Bold, e.g. `Fri Nov 06`.
 - **12/24-hour aware.** Follows the watch's clock-style setting.
 - **Battery-friendly.** Redraws once per minute and on battery-level changes only.
