@@ -347,9 +347,10 @@ enum {
 #define DUAL_BAR_THICK  (WATCH_BAR_THICK_DUAL + PHONE_BAR_GAP + PHONE_BAR_THICK)
 
 /* The SIDE_BAR layout (vertical bars, horizontal date) uses thicker bars:
- * 8 + 2 + 8 = 18 px. Its digits get narrower to suit; the date doesn't. */
-#define SB_WATCH_BAR_THICK_DUAL  8
-#define SB_PHONE_BAR_THICK       8
+ * 10 + 2 + 10 = 22 px. Its digits get narrower to suit; the date box keeps
+ * its single-bar width unless that would run into the bars. */
+#define SB_WATCH_BAR_THICK_DUAL 10
+#define SB_PHONE_BAR_THICK      10
 #define SB_DUAL_BAR_THICK  (SB_WATCH_BAR_THICK_DUAL + PHONE_BAR_GAP \
                             + SB_PHONE_BAR_THICK)
 
@@ -570,15 +571,21 @@ static void layout_compute(Layout *L, GRect b) {
                               sb_bar, h - 2 * VBAR_MARGIN_Y);
 
       /* Date: same strip at the bottom, but only as wide as the area to
-       * the left of a single bar. It keeps that width when the bar is
-       * wider (the extra comes out of the gap beside the date), so the
-       * phone bar never makes the date smaller. If the text is still too
+       * the left of a single bar. It keeps that width when the bars are
+       * wider (the extra comes out of the gap beside the date), except
+       * that it never reaches into the bars themselves; with 22 px bars it
+       * loses 2 px. The text is centred, so this only matters for a date
+       * more than 118 px wide. If the text is still too
        * wide it drops to a smaller font automatically (see
        * draw_date_horizontal). */
       L->date_vertical = false;
-      L->date_rect = GRect(SIDE_MARGIN, DATE_Y,
-                           w - SIDE_MARGIN - BAR_GAP - VBAR_W - SIDE_MARGIN,
-                           DATE_H);
+      int date_w = w - SIDE_MARGIN - BAR_GAP - VBAR_W - SIDE_MARGIN;
+      /* Very wide bars would overlap that box; stop it at the bars. */
+      const int bar_left = w - SIDE_MARGIN - sb_bar;
+      if (SIDE_MARGIN + date_w > bar_left) {
+        date_w = bar_left - SIDE_MARGIN;
+      }
+      L->date_rect = GRect(SIDE_MARGIN, DATE_Y, date_w, DATE_H);
       break;
     }
 
