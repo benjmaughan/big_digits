@@ -15,7 +15,7 @@
         "sdkVersion": "3",
         "enableMultiJS": true,
         "capabilities": ["configurable"],
-        "messageKeys": ["ColorScheme", "DigitGaps", "SegmentedBattery", "Layout", "DateFormat", "BtVibrate"],
+        "messageKeys": ["ColorScheme", "DigitGaps", "SegmentedBattery", "Layout", "DateFormat", "BtVibrate", "PhoneBattery", "PhoneSegmented", "PhoneBatteryLevel", "PhoneBatteryRequest"],
         "targetPlatforms": [
             "basalt"
         ],

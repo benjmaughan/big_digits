@@ -6,7 +6,7 @@
  *
  * WHAT IT DRAWS
  *   - The time as two rows of huge seven-segment digits (HH over MM).
- *   - A battery bar.
+ *   - A battery bar, optionally with a thinner phone battery bar beside it.
  *   - A Bluetooth-disconnected indicator (only visible while disconnected),
  *     with optional vibration when the connection drops or returns.
  *   - The date, either as text ("Fri Nov 06") or numerically with bars
@@ -28,6 +28,10 @@
  *   6. Bluetooth vibration: off / on disconnect / on disconnect and
  *                           reconnect. (The indicator itself always shows
  *                           while disconnected.)
+ *   7. Phone battery      : show a second bar for the phone's battery,
+ *                           below (horizontal) or right of (vertical) the
+ *                           watch bar, sharing the same space.
+ *   8. Segmented phone bar: blocks or smooth, independent of setting 3.
  *
  * QUICK TWEAK GUIDE
  *   Everything below is a #define in section 1. Edit, rebuild, repeat.
@@ -51,6 +55,8 @@
  *     Bar length (vertical) .. VBAR_MARGIN_Y (smaller = longer bar)
  *     Segmented blocks ....... VBLOCK_H, HBLOCK_W, BLOCK_GAP, BLOCK_BORDER
  *     Thin "used" line ....... BAR_THIN, BAR_THIN_HC
+ *   Phone battery bar
+ *     Thickness / gap ........ PHONE_BAR_THICK, PHONE_BAR_GAP
  *   Time digits
  *     Standard layout ........ STD_*      Side-bar layout ... SB_*
  *     Vertical-date layout ... SBV_*
@@ -82,7 +88,7 @@
  *   2. Settings        (load / save / defaults, and the color palettes)
  *   3. Layout          (works out where everything goes for each layout)
  *   4. Drawing         (digits, battery, date)
- *   5. Time + events   (minute tick, battery events, settings from phone)
+ *   5. Time + events   (minute tick, battery events, messages from phone)
  *   6. Window + app lifecycle
  */
 
@@ -307,10 +313,36 @@ enum {
 #define HBLOCK_W          9  /* block width when the bar is horizontal       */
 #define VBLOCK_H         13  /* block height when the bar is vertical        */
 #define BLOCK_GAP         3  /* space between neighbouring blocks            */
-#define BLOCK_BORDER      2  /* outline thickness of a hollow block          */
+#define BLOCK_BORDER      2  /* outline thickness of a hollow block. Reduced
+                                automatically on thin bars so a hollow block
+                                always keeps a visible hole in the middle    */
+
+/*
+ * ---- Phone battery bar ----
+ * An optional second, thinner bar showing the phone's battery, drawn
+ * alongside the watch battery bar: below it when the bar is horizontal, to
+ * its right when the bar is vertical. The two bars share the space the
+ * single watch bar would use (BAR_THICK or VBAR_W), so turning it on doesn't
+ * move anything else on the screen:
+ *
+ *   watch bar thickness = total - PHONE_BAR_GAP - PHONE_BAR_THICK
+ *
+ * With the defaults (total 10, gap 2, phone 4) both bars are 4 px thick.
+ * Make PHONE_BAR_THICK smaller for a thinner phone bar and a thicker watch
+ * bar.
+ *
+ * The phone sends its battery level from the PebbleKit JS side
+ * (src/pkjs/index.js). Until a level has arrived, or while the phone is
+ * disconnected, the phone bar is hidden and the watch bar goes back to full
+ * thickness.
+ */
+#define PHONE_BAR_THICK   4  /* thickness of the phone bar                   */
+#define PHONE_BAR_GAP     2  /* space between the watch bar and phone bar    */
 
 /* ---- Persistent storage key ---- */
-#define SETTINGS_KEY      5  /* bumped because the settings struct changed   */
+#define SETTINGS_KEY      5  /* change only if existing fields are reordered
+                                or removed; new fields go at the end of the
+                                struct (see settings_load)                   */
 
 /* ======================================================================
  * 2. SETTINGS
@@ -327,7 +359,14 @@ typedef struct {
   uint8_t layout;             /* one of the LAYOUT_* values                  */
   uint8_t date_format;        /* one of the DATE_FORMAT_* values             */
   uint8_t bt_vibrate;         /* one of the BT_VIBE_* values                 */
+  /* ---- Added later: keep new fields below this line ---- */
+  bool    phone_battery;      /* show the phone battery bar                  */
+  bool    phone_segmented;    /* phone bar as 10 blocks instead of smooth    */
 } Settings;
+
+/* Size of the settings saved by the previous version (everything up to
+ * phone_battery), so those can still be read after an upgrade. */
+#define SETTINGS_V1_SIZE  ((int)offsetof(Settings, phone_battery))
 
 static Settings s_settings;
 
@@ -352,11 +391,18 @@ static void settings_load(void) {
     /* .bt_vibrate        = BT_VIBE_OFF, */
     /* .bt_vibrate        = BT_VIBE_DISCONNECT, */
     .bt_vibrate        = BT_VIBE_BOTH,
+    .phone_battery     = true,
+    .phone_segmented   = true,
   };
 
-  if (persist_exists(SETTINGS_KEY) &&
-      persist_get_size(SETTINGS_KEY) == (int)sizeof(Settings)) {
-    persist_read_data(SETTINGS_KEY, &s_settings, sizeof(s_settings));
+  /* Read either the current struct, or the shorter one saved by the
+   * previous version (whose fields are a prefix of this one); in the latter
+   * case the newer fields keep their defaults. */
+  if (persist_exists(SETTINGS_KEY)) {
+    const int size = persist_get_size(SETTINGS_KEY);
+    if (size == (int)sizeof(Settings) || size == SETTINGS_V1_SIZE) {
+      persist_read_data(SETTINGS_KEY, &s_settings, size);
+    }
   }
 
   /* Guard against corrupt data: out-of-range values fall back. */
@@ -392,6 +438,8 @@ static bool s_bt_connected = true; /* is the phone connected?               */
 
 static int s_hour, s_min;          /* time to display (hour already 12/24h)  */
 static int s_battery = 100;        /* battery charge, 0-100                  */
+static int s_phone_battery = -1;   /* phone battery, 0-100, or -1 = unknown
+                                      (not yet received, or disconnected)    */
 
 /* Date pieces. They are kept separately so the vertical layout can draw
  * "Fri", "Nov" and "07" as distinct groups, and the horizontal layouts
@@ -442,7 +490,9 @@ typedef struct {
 
   /* Battery */
   bool battery_vertical;  /* true = fills bottom-up, false = fills left-right*/
-  GRect battery_rect;     /* full extent of the bar                          */
+  GRect battery_rect;     /* full extent of the watch battery bar            */
+  bool show_phone;        /* draw the phone battery bar                      */
+  GRect phone_rect;       /* the phone bar (only valid if show_phone)        */
 
   /* Date */
   bool date_vertical;     /* true = one character per line                   */
@@ -578,6 +628,29 @@ static void layout_compute(Layout *L, GRect b) {
       bar->size.w   -= BT_ICON_W + BT_ICON_GAP;
     }
   }
+
+  /*
+   * Phone battery bar. Split the bar's thickness in two: the watch bar keeps
+   * the top (horizontal) or left (vertical) part, and the phone bar takes
+   * the bottom or right part, with PHONE_BAR_GAP between them. This happens
+   * after the Bluetooth adjustment so both bars are the same length.
+   */
+  L->show_phone = s_settings.phone_battery && s_phone_battery >= 0;
+  if (L->show_phone) {
+    GRect *bar = &L->battery_rect;
+    if (L->battery_vertical) {
+      const int watch_w = bar->size.w - PHONE_BAR_GAP - PHONE_BAR_THICK;
+      L->phone_rect = GRect(bar->origin.x + watch_w + PHONE_BAR_GAP,
+                            bar->origin.y, PHONE_BAR_THICK, bar->size.h);
+      bar->size.w = watch_w;
+    } else {
+      const int watch_h = bar->size.h - PHONE_BAR_GAP - PHONE_BAR_THICK;
+      L->phone_rect = GRect(bar->origin.x,
+                            bar->origin.y + watch_h + PHONE_BAR_GAP,
+                            bar->size.w, PHONE_BAR_THICK);
+      bar->size.h = watch_h;
+    }
+  }
 }
 
 /* ======================================================================
@@ -687,7 +760,8 @@ typedef struct {
   GColor background;   /* the screen, and the inside of hollow battery blocks */
   GColor digits;       /* the time digits and the date text                    */
   GColor bar_on;       /* battery: the charge remaining                        */
-  GColor bar_off;      /* battery: the charge used                             */
+  GColor phone_on;     /* phone battery: the charge remaining                  */
+  GColor bar_off;      /* battery: the charge used (both bars)                 */
   GColor alert;        /* the Bluetooth-disconnected indicator                 */
 } Palette;
 
@@ -704,13 +778,23 @@ typedef struct {
  * In the two single-color schemes the "remaining" and "used" parts of the
  * battery are the same color; they are told apart by thickness (thick bar
  * vs. thin line) or by solid vs. hollow blocks.
+ *
+ * The phone bar follows the same rules, color-coded by the phone's own
+ * charge.
  */
+static GColor level_color(int percent) {
+  return (percent > 40) ? GColorGreen
+       : (percent > 20) ? GColorYellow
+       :                  GColorRed;
+}
+
 static void palette_get(Palette *p) {
   switch (s_settings.color_scheme) {
     case SCHEME_HIGH_CONTRAST:
       p->background = GColorBlack;
       p->digits     = GColorWhite;
       p->bar_on     = GColorWhite;
+      p->phone_on   = GColorWhite;
       p->bar_off    = GColorWhite;
       p->alert      = GColorWhite;
       break;
@@ -719,6 +803,7 @@ static void palette_get(Palette *p) {
       p->background = LCD_BACKGROUND;
       p->digits     = LCD_INK;
       p->bar_on     = LCD_INK;
+      p->phone_on   = LCD_INK;
       p->bar_off    = LCD_INK;
       p->alert      = LCD_INK;
       break;
@@ -727,9 +812,8 @@ static void palette_get(Palette *p) {
     default:
       p->background = GColorBlack;
       p->digits     = GColorWhite;
-      p->bar_on     = (s_battery > 40) ? GColorGreen
-                    : (s_battery > 20) ? GColorYellow
-                    :                    GColorRed;
+      p->bar_on     = level_color(s_battery);
+      p->phone_on   = level_color(s_phone_battery);
       p->bar_off    = GColorLightGray;
       p->alert      = GColorRed;
       break;
@@ -740,23 +824,28 @@ static void palette_get(Palette *p) {
 
 /*
  * Draw one block of the segmented battery.
- *   filled : solid block in the "on" color
- *   hollow : outline in the "off" color with the background color inside
+ *   filled : solid block in the `on` color
+ *   hollow : outline in the "off" color with the background color inside,
+ *            `border` pixels thick
  */
-static void draw_block(GContext *ctx, int x, int y, int w, int h,
-                       bool filled, const Palette *P) {
-  graphics_context_set_fill_color(ctx, filled ? P->bar_on : P->bar_off);
+static void draw_block(GContext *ctx, int x, int y, int w, int h, int border,
+                       bool filled, GColor on, const Palette *P) {
+  graphics_context_set_fill_color(ctx, filled ? on : P->bar_off);
   fill(ctx, x, y, w, h);
   if (!filled) {
-    /* Punch out the middle so only a border of BLOCK_BORDER px remains. */
+    /* Punch out the middle so only the border remains. */
     graphics_context_set_fill_color(ctx, P->background);
-    fill(ctx, x + BLOCK_BORDER, y + BLOCK_BORDER,
-         w - 2 * BLOCK_BORDER, h - 2 * BLOCK_BORDER);
+    fill(ctx, x + border, y + border, w - 2 * border, h - 2 * border);
   }
 }
 
 /*
- * Draw the battery in whichever style and orientation is active.
+ * Draw one battery bar (the watch's or the phone's) in rectangle `r`.
+ *
+ *   level     : charge, 0-100
+ *   vertical  : true = fills bottom-up, false = fills left to right
+ *   segmented : 10 blocks instead of a continuous bar
+ *   on        : color of the charge remaining
  *
  * Continuous style : a thick bar for the charge remaining and a thin line
  *                    for the charge used, so the bar visibly "thins out"
@@ -767,19 +856,27 @@ static void draw_block(GContext *ctx, int x, int y, int w, int h,
  * Horizontal bars fill from left to right; vertical bars fill from the
  * bottom up (like a thermometer).
  */
-static void draw_battery(GContext *ctx, const Layout *L, const Palette *P) {
-  const GRect r = L->battery_rect;
+static void draw_battery_bar(GContext *ctx, GRect r, int level, bool vertical,
+                             bool segmented, GColor on, const Palette *P) {
+  /* How thick the bar is across its short side. */
+  const int thick = vertical ? r.size.w : r.size.h;
 
-  if (s_settings.segmented_battery) {
+  if (segmented) {
     /* ---- Segmented: 10 blocks ---- */
-    const int filled = (s_battery + 5) / 10;   /* 0-10, nearest 10% */
+    const int filled = (level + 5) / 10;   /* 0-10, nearest 10% */
+
+    /* Thin bars (e.g. when the phone bar shares the space) get a thinner
+     * outline so a hollow block still has a hole in the middle. */
+    int border = BLOCK_BORDER;
+    if (2 * border > thick - 2) border = (thick - 2) / 2;
+    if (border < 1) border = 1;
 
     /*
      * Each block is its preferred size (VBLOCK_H / HBLOCK_W), but is made
      * smaller if the bar is too short for ten of them (which happens while
      * the Bluetooth icon is taking up one end of the bar).
      */
-    if (L->battery_vertical) {
+    if (vertical) {
       int block_h = (r.size.h - (BLOCKS - 1) * BLOCK_GAP) / BLOCKS;
       if (block_h > VBLOCK_H) block_h = VBLOCK_H;
 
@@ -790,8 +887,8 @@ static void draw_battery(GContext *ctx, const Layout *L, const Palette *P) {
       for (int i = 0; i < BLOCKS; i++) {
         /* Block 0 is the bottom one, so it is lit first as charge rises. */
         const int by = y0 + (BLOCKS - 1 - i) * (block_h + BLOCK_GAP);
-        draw_block(ctx, r.origin.x, by, r.size.w, block_h,
-                   i < filled, P);
+        draw_block(ctx, r.origin.x, by, r.size.w, block_h, border,
+                   i < filled, on, P);
       }
     } else {
       int block_w = (r.size.w - (BLOCKS - 1) * BLOCK_GAP) / BLOCKS;
@@ -803,22 +900,26 @@ static void draw_battery(GContext *ctx, const Layout *L, const Palette *P) {
       const int x0 = r.origin.x + r.size.w - total;
       for (int i = 0; i < BLOCKS; i++) {
         const int bx = x0 + i * (block_w + BLOCK_GAP);
-        draw_block(ctx, bx, r.origin.y, block_w, r.size.h,
-                   i < filled, P);
+        draw_block(ctx, bx, r.origin.y, block_w, r.size.h, border,
+                   i < filled, on, P);
       }
     }
   } else {
     /* ---- Continuous: thick "remaining" bar + thin "used" line ---- */
     /* In the single-color schemes the thin line needs to be a bit thicker
-     * to stay clearly visible, since it can't be told apart by color. */
-    const int thin = (s_settings.color_scheme == SCHEME_STANDARD)
-                       ? BAR_THIN : BAR_THIN_HC;
+     * to stay clearly visible, since it can't be told apart by color. It is
+     * capped at half the bar's thickness so it still looks thin on a narrow
+     * bar. */
+    int thin = (s_settings.color_scheme == SCHEME_STANDARD)
+                 ? BAR_THIN : BAR_THIN_HC;
+    if (thin > thick / 2) thin = thick / 2;
+    if (thin < 1) thin = 1;
 
-    if (L->battery_vertical) {
-      const int fill_h = r.size.h * s_battery / 100;        /* thick part */
+    if (vertical) {
+      const int fill_h = r.size.h * level / 100;            /* thick part */
       const int fill_y = r.origin.y + r.size.h - fill_h;    /* its top    */
 
-      graphics_context_set_fill_color(ctx, P->bar_on);
+      graphics_context_set_fill_color(ctx, on);
       fill(ctx, r.origin.x, fill_y, r.size.w, fill_h);
 
       /* Thin line occupies the empty space above, centred in the bar. */
@@ -826,9 +927,9 @@ static void draw_battery(GContext *ctx, const Layout *L, const Palette *P) {
       fill(ctx, r.origin.x + (r.size.w - thin) / 2, r.origin.y,
            thin, r.size.h - fill_h);
     } else {
-      const int fill_w = r.size.w * s_battery / 100;
+      const int fill_w = r.size.w * level / 100;
 
-      graphics_context_set_fill_color(ctx, P->bar_on);
+      graphics_context_set_fill_color(ctx, on);
       fill(ctx, r.origin.x, r.origin.y, fill_w, r.size.h);
 
       /* Thin line occupies the empty space to the right, centred. */
@@ -836,6 +937,16 @@ static void draw_battery(GContext *ctx, const Layout *L, const Palette *P) {
       fill(ctx, r.origin.x + fill_w, r.origin.y + (r.size.h - thin) / 2,
            r.size.w - fill_w, thin);
     }
+  }
+}
+
+/* Draw the watch battery bar, and the phone bar beside it if enabled. */
+static void draw_battery(GContext *ctx, const Layout *L, const Palette *P) {
+  draw_battery_bar(ctx, L->battery_rect, s_battery, L->battery_vertical,
+                   s_settings.segmented_battery, P->bar_on, P);
+  if (L->show_phone) {
+    draw_battery_bar(ctx, L->phone_rect, s_phone_battery, L->battery_vertical,
+                     s_settings.phone_segmented, P->phone_on, P);
   }
 }
 
@@ -1217,6 +1328,22 @@ static void vibrate(uint32_t *segments, uint32_t count) {
 }
 
 /*
+ * Ask the phone for its current battery level. The JS side also sends it
+ * whenever the level changes, but those updates can be missed while the
+ * watch is disconnected, so we ask again on reconnection.
+ */
+static void request_phone_battery(void) {
+  if (!s_settings.phone_battery) {
+    return;
+  }
+  DictionaryIterator *out;
+  if (app_message_outbox_begin(&out) == APP_MSG_OK) {
+    dict_write_uint8(out, MESSAGE_KEY_PhoneBatteryRequest, 1);
+    app_message_outbox_send();
+  }
+}
+
+/*
  * Called by the system when the connection to the phone is made or lost.
  * It only fires on a change, so we never vibrate for a state we were
  * already in (and not at all when the watchface is first loaded while
@@ -1236,6 +1363,14 @@ static void connection_handler(bool connected) {
       vibrate(restored_pattern,
               sizeof(restored_pattern) / sizeof(restored_pattern[0]));
     }
+  }
+
+  /* The phone's battery level is stale while disconnected, so hide the
+   * phone bar until a fresh one arrives. */
+  if (!connected) {
+    s_phone_battery = -1;
+  } else if (changed) {
+    request_phone_battery();
   }
 
   /* Redraw either way: the icon appears/disappears and the bar resizes. */
@@ -1270,12 +1405,38 @@ static int tuple_to_int(const Tuple *t) {
 }
 
 /*
- * Called when the phone sends new settings (the user pressed Save in the
- * settings page). Each key is optional, so only fields present in the
- * message are changed. The result is saved and the face is redrawn.
+ * Called when the phone sends a message. Two kinds arrive:
+ *   - new settings (the user pressed Save in the settings page). Each key
+ *     is optional, so only fields present in the message are changed, and
+ *     the result is saved.
+ *   - the phone's battery level, sent by src/pkjs/index.js. This is not
+ *     a setting, so it is just stored in memory.
+ * Either way the face is redrawn.
  */
 static void inbox_received(DictionaryIterator *iter, void *context) {
   Tuple *t;
+
+  if ((t = dict_find(iter, MESSAGE_KEY_PhoneBatteryLevel))) {
+    int v = tuple_to_int(t);
+    s_phone_battery = (v < 0) ? -1 : (v > 100) ? 100 : v;
+  }
+
+  /* A battery-only message stops here, without touching storage. */
+  const bool has_settings =
+      dict_find(iter, MESSAGE_KEY_ColorScheme)   ||
+      dict_find(iter, MESSAGE_KEY_DigitGaps)     ||
+      dict_find(iter, MESSAGE_KEY_SegmentedBattery) ||
+      dict_find(iter, MESSAGE_KEY_Layout)        ||
+      dict_find(iter, MESSAGE_KEY_DateFormat)    ||
+      dict_find(iter, MESSAGE_KEY_BtVibrate)     ||
+      dict_find(iter, MESSAGE_KEY_PhoneBattery)  ||
+      dict_find(iter, MESSAGE_KEY_PhoneSegmented);
+  if (!has_settings) {
+    if (s_canvas) {
+      layer_mark_dirty(s_canvas);
+    }
+    return;
+  }
 
   if ((t = dict_find(iter, MESSAGE_KEY_ColorScheme))) {
     int v = tuple_to_int(t);
@@ -1304,6 +1465,17 @@ static void inbox_received(DictionaryIterator *iter, void *context) {
     int v = tuple_to_int(t);
     s_settings.bt_vibrate = (v >= 0 && v < BT_VIBE_COUNT) ? (uint8_t)v
                                                           : BT_VIBE_DISCONNECT;
+  }
+
+  if ((t = dict_find(iter, MESSAGE_KEY_PhoneBattery))) {
+    const bool was_on = s_settings.phone_battery;
+    s_settings.phone_battery = (tuple_to_int(t) == 1);
+    if (s_settings.phone_battery && !was_on) {
+      request_phone_battery();
+    }
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_PhoneSegmented))) {
+    s_settings.phone_segmented = (tuple_to_int(t) == 1);
   }
 
   settings_save();
@@ -1367,7 +1539,8 @@ static void init(void) {
     .pebble_app_connection_handler = connection_handler,
   });
 
-  /* Receive settings from the phone. Small buffers are plenty. */
+  /* Receive settings and the phone battery level from the phone, and send
+   * phone-battery requests. Small buffers are plenty. */
   app_message_register_inbox_received(inbox_received);
   app_message_open(128, 128);
 }
