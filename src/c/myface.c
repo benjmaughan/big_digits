@@ -57,7 +57,9 @@
  *     Thin "used" line ....... BAR_THIN, BAR_THIN_HC
  *   Phone battery bar
  *     Thickness / gap ........ WATCH_BAR_THICK_DUAL, PHONE_BAR_THICK,
- *                              PHONE_BAR_GAP (digits resize to suit)
+ *                              PHONE_BAR_GAP (digits resize to suit);
+ *                              SIDE_BAR layout: SB_WATCH_BAR_THICK_DUAL,
+ *                              SB_PHONE_BAR_THICK
  *     Colors (Standard) ...... PHONE_COLOR_HIGH, PHONE_COLOR_MID,
  *                              PHONE_COLOR_LOW
  *   Time digits
@@ -344,6 +346,13 @@ enum {
 #define PHONE_BAR_GAP         2  /* space between the watch bar and phone bar*/
 #define DUAL_BAR_THICK  (WATCH_BAR_THICK_DUAL + PHONE_BAR_GAP + PHONE_BAR_THICK)
 
+/* The SIDE_BAR layout (vertical bars, horizontal date) uses thicker bars:
+ * 8 + 2 + 8 = 18 px. Its digits get narrower to suit; the date doesn't. */
+#define SB_WATCH_BAR_THICK_DUAL  8
+#define SB_PHONE_BAR_THICK       8
+#define SB_DUAL_BAR_THICK  (SB_WATCH_BAR_THICK_DUAL + PHONE_BAR_GAP \
+                            + SB_PHONE_BAR_THICK)
+
 /* Phone bar colors in the Standard scheme (same thresholds as the watch
  * bar). Any of the 64 Pebble Time colors can be used, e.g. GColorPictonBlue,
  * GColorCyan, GColorVividViolet, GColorMagenta, GColorChromeYellow. */
@@ -505,6 +514,7 @@ typedef struct {
   GRect battery_rect;     /* full extent of the watch battery bar            */
   bool show_phone;        /* draw the phone battery bar                      */
   GRect phone_rect;       /* the phone bar (only valid if show_phone)        */
+  int phone_thick;        /* thickness of the phone bar for this layout      */
 
   /* Date */
   bool date_vertical;     /* true = one character per line                   */
@@ -529,6 +539,7 @@ static void layout_compute(Layout *L, GRect b) {
   const bool dual  = s_settings.phone_battery;
   const int  hbar  = dual ? DUAL_BAR_THICK : BAR_THICK;   /* horizontal */
   const int  vbar  = dual ? DUAL_BAR_THICK : VBAR_W;      /* vertical   */
+  L->phone_thick   = PHONE_BAR_THICK;   /* SIDE_BAR overrides this below */
 
   switch (s_settings.layout) {
 
@@ -539,7 +550,11 @@ static void layout_compute(Layout *L, GRect b) {
        * The digits get whatever width is left after the bar and margins,
        * so they are narrower than in the standard layout.
        */
-      const int avail = w - SIDE_MARGIN - BAR_GAP - vbar - SIDE_MARGIN;
+      /* This layout has its own, thicker dual-bar size. */
+      const int sb_bar = dual ? SB_DUAL_BAR_THICK : VBAR_W;
+      L->phone_thick   = SB_PHONE_BAR_THICK;
+
+      const int avail = w - SIDE_MARGIN - BAR_GAP - sb_bar - SIDE_MARGIN;
 
       L->digit_h   = SB_DIGIT_H;
       L->seg_t     = SB_SEG_T;
@@ -551,8 +566,8 @@ static void layout_compute(Layout *L, GRect b) {
 
       /* Bar: full height, flush with the right-hand margin. */
       L->battery_vertical = true;
-      L->battery_rect = GRect(w - SIDE_MARGIN - vbar, VBAR_MARGIN_Y,
-                              vbar, h - 2 * VBAR_MARGIN_Y);
+      L->battery_rect = GRect(w - SIDE_MARGIN - sb_bar, VBAR_MARGIN_Y,
+                              sb_bar, h - 2 * VBAR_MARGIN_Y);
 
       /* Date: same strip at the bottom, but only as wide as the area to
        * the left of a single bar. It keeps that width when the bar is
@@ -664,22 +679,23 @@ static void layout_compute(Layout *L, GRect b) {
    * the top (horizontal) or left (vertical) part, and the phone bar takes
    * the bottom or right part, with PHONE_BAR_GAP between them. This happens
    * after the Bluetooth adjustment so both bars are the same length. With
-   * the space sized as DUAL_BAR_THICK, the watch bar comes out at
-   * WATCH_BAR_THICK_DUAL.
+   * the space sized as DUAL_BAR_THICK (SB_DUAL_BAR_THICK in the SIDE_BAR
+   * layout), the watch bar comes out at WATCH_BAR_THICK_DUAL
+   * (SB_WATCH_BAR_THICK_DUAL).
    */
   L->show_phone = s_settings.phone_battery && s_phone_battery >= 0;
   if (L->show_phone) {
     GRect *bar = &L->battery_rect;
     if (L->battery_vertical) {
-      const int watch_w = bar->size.w - PHONE_BAR_GAP - PHONE_BAR_THICK;
+      const int watch_w = bar->size.w - PHONE_BAR_GAP - L->phone_thick;
       L->phone_rect = GRect(bar->origin.x + watch_w + PHONE_BAR_GAP,
-                            bar->origin.y, PHONE_BAR_THICK, bar->size.h);
+                            bar->origin.y, L->phone_thick, bar->size.h);
       bar->size.w = watch_w;
     } else {
-      const int watch_h = bar->size.h - PHONE_BAR_GAP - PHONE_BAR_THICK;
+      const int watch_h = bar->size.h - PHONE_BAR_GAP - L->phone_thick;
       L->phone_rect = GRect(bar->origin.x,
                             bar->origin.y + watch_h + PHONE_BAR_GAP,
-                            bar->size.w, PHONE_BAR_THICK);
+                            bar->size.w, L->phone_thick);
       bar->size.h = watch_h;
     }
   }
