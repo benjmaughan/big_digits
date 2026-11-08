@@ -56,7 +56,8 @@
  *     Segmented blocks ....... VBLOCK_H, HBLOCK_W, BLOCK_GAP, BLOCK_BORDER
  *     Thin "used" line ....... BAR_THIN, BAR_THIN_HC
  *   Phone battery bar
- *     Thickness / gap ........ PHONE_BAR_THICK, PHONE_BAR_GAP
+ *     Thickness / gap ........ WATCH_BAR_THICK_DUAL, PHONE_BAR_THICK,
+ *                              PHONE_BAR_GAP (digits resize to suit)
  *   Time digits
  *     Standard layout ........ STD_*      Side-bar layout ... SB_*
  *     Vertical-date layout ... SBV_*
@@ -319,25 +320,27 @@ enum {
 
 /*
  * ---- Phone battery bar ----
- * An optional second, thinner bar showing the phone's battery, drawn
- * alongside the watch battery bar: below it when the bar is horizontal, to
- * its right when the bar is vertical. The two bars share the space the
- * single watch bar would use (BAR_THICK or VBAR_W), so turning it on doesn't
- * move anything else on the screen:
+ * An optional second bar showing the phone's battery, drawn alongside the
+ * watch battery bar: below it when the bar is horizontal, to its right when
+ * the bar is vertical. When the phone bar is turned on in the settings, the
+ * two bars together take up
  *
- *   watch bar thickness = total - PHONE_BAR_GAP - PHONE_BAR_THICK
+ *   WATCH_BAR_THICK_DUAL + PHONE_BAR_GAP + PHONE_BAR_THICK   (6+2+6 = 14 px)
  *
- * With the defaults (total 10, gap 2, phone 4) both bars are 4 px thick.
- * Make PHONE_BAR_THICK smaller for a thinner phone bar and a thicker watch
- * bar.
+ * instead of the single bar's BAR_THICK / VBAR_W (10 px), and the time
+ * digits shrink to make room: shorter in the standard layout, narrower in
+ * the side-bar layouts. The date keeps its size.
  *
  * The phone sends its battery level from the PebbleKit JS side
  * (src/pkjs/index.js). Until a level has arrived, or while the phone is
- * disconnected, the phone bar is hidden and the watch bar goes back to full
- * thickness.
+ * disconnected, the phone bar is hidden and the watch bar fills the whole
+ * space. The digits don't change size when that happens; they only depend
+ * on the setting.
  */
-#define PHONE_BAR_THICK   4  /* thickness of the phone bar                   */
-#define PHONE_BAR_GAP     2  /* space between the watch bar and phone bar    */
+#define WATCH_BAR_THICK_DUAL  6  /* watch bar thickness beside the phone bar */
+#define PHONE_BAR_THICK       6  /* thickness of the phone bar               */
+#define PHONE_BAR_GAP         2  /* space between the watch bar and phone bar*/
+#define DUAL_BAR_THICK  (WATCH_BAR_THICK_DUAL + PHONE_BAR_GAP + PHONE_BAR_THICK)
 
 /* ---- Persistent storage key ---- */
 #define SETTINGS_KEY      5  /* change only if existing fields are reordered
@@ -513,6 +516,11 @@ static void layout_compute(Layout *L, GRect b) {
 
   L->show_bt = false;   /* switched on at the end if we are disconnected */
 
+  /* Thickness of the battery bar space: wider when it holds two bars. */
+  const bool dual  = s_settings.phone_battery;
+  const int  hbar  = dual ? DUAL_BAR_THICK : BAR_THICK;   /* horizontal */
+  const int  vbar  = dual ? DUAL_BAR_THICK : VBAR_W;      /* vertical   */
+
   switch (s_settings.layout) {
 
     case LAYOUT_SIDE_BAR: {
@@ -522,7 +530,7 @@ static void layout_compute(Layout *L, GRect b) {
        * The digits get whatever width is left after the bar and margins,
        * so they are narrower than in the standard layout.
        */
-      const int avail = w - SIDE_MARGIN - BAR_GAP - VBAR_W - SIDE_MARGIN;
+      const int avail = w - SIDE_MARGIN - BAR_GAP - vbar - SIDE_MARGIN;
 
       L->digit_h   = SB_DIGIT_H;
       L->seg_t     = SB_SEG_T;
@@ -534,14 +542,19 @@ static void layout_compute(Layout *L, GRect b) {
 
       /* Bar: full height, flush with the right-hand margin. */
       L->battery_vertical = true;
-      L->battery_rect = GRect(w - SIDE_MARGIN - VBAR_W, VBAR_MARGIN_Y,
-                              VBAR_W, h - 2 * VBAR_MARGIN_Y);
+      L->battery_rect = GRect(w - SIDE_MARGIN - vbar, VBAR_MARGIN_Y,
+                              vbar, h - 2 * VBAR_MARGIN_Y);
 
       /* Date: same strip at the bottom, but only as wide as the area to
-       * the left of the bar. If the text is still too wide it drops to a
-       * smaller font automatically (see draw_date_horizontal). */
+       * the left of a single bar. It keeps that width when the bar is
+       * wider (the extra comes out of the gap beside the date), so the
+       * phone bar never makes the date smaller. If the text is still too
+       * wide it drops to a smaller font automatically (see
+       * draw_date_horizontal). */
       L->date_vertical = false;
-      L->date_rect = GRect(SIDE_MARGIN, DATE_Y, avail, DATE_H);
+      L->date_rect = GRect(SIDE_MARGIN, DATE_Y,
+                           w - SIDE_MARGIN - BAR_GAP - VBAR_W - SIDE_MARGIN,
+                           DATE_H);
       break;
     }
 
@@ -551,7 +564,7 @@ static void layout_compute(Layout *L, GRect b) {
        *   SIDE_MARGIN | digits | BAR_GAP | bar | SBV_DATE_GAP |
        *   date column | SIDE_MARGIN
        */
-      const int avail = w - SIDE_MARGIN - BAR_GAP - VBAR_W
+      const int avail = w - SIDE_MARGIN - BAR_GAP - vbar
                           - SBV_DATE_GAP - SBV_DATE_COL_W - SIDE_MARGIN;
 
       L->digit_h   = SBV_DIGIT_H;
@@ -567,10 +580,10 @@ static void layout_compute(Layout *L, GRect b) {
 
       /* Bar sits just right of the digits, left of the date column. */
       const int bar_x = w - SIDE_MARGIN - SBV_DATE_COL_W
-                          - SBV_DATE_GAP - VBAR_W;
+                          - SBV_DATE_GAP - vbar;
       L->battery_vertical = true;
       L->battery_rect = GRect(bar_x, VBAR_MARGIN_Y,
-                              VBAR_W, h - 2 * VBAR_MARGIN_Y);
+                              vbar, h - 2 * VBAR_MARGIN_Y);
 
       /* Date column: the full height at the far right edge. */
       L->date_vertical = true;
@@ -581,19 +594,27 @@ static void layout_compute(Layout *L, GRect b) {
 
     case LAYOUT_STANDARD:
     default: {
+      /*
+       * A wider (two-bar) battery strip grows upwards, keeping its bottom
+       * edge and the date where they are; the digits get shorter by the
+       * same amount, split between the two rows.
+       */
+      const int extra = hbar - BAR_THICK;
+
       /* Digits fill the width, centred. */
       L->digit_w   = STD_DIGIT_W;
-      L->digit_h   = STD_DIGIT_H;
+      L->digit_h   = STD_DIGIT_H - (extra + 1) / 2;
       L->seg_t     = STD_SEG_T;
       L->digit_gap = STD_DIGIT_GAP;
       L->x0        = (w - (2 * L->digit_w + L->digit_gap)) / 2;
       L->row1_y    = STD_ROW1_Y;
-      L->row2_y    = STD_ROW2_Y;
+      L->row2_y    = STD_ROW1_Y + L->digit_h
+                       + (STD_ROW2_Y - STD_ROW1_Y - STD_DIGIT_H);
 
       /* Battery: a horizontal bar across the screen below the digits. */
       L->battery_vertical = false;
-      L->battery_rect = GRect(HBAR_MARGIN, HBAR_Y,
-                              w - 2 * HBAR_MARGIN, BAR_THICK);
+      L->battery_rect = GRect(HBAR_MARGIN, HBAR_Y - extra,
+                              w - 2 * HBAR_MARGIN, hbar);
 
       /* Date: full-width strip at the bottom. */
       L->date_vertical = false;
@@ -633,7 +654,9 @@ static void layout_compute(Layout *L, GRect b) {
    * Phone battery bar. Split the bar's thickness in two: the watch bar keeps
    * the top (horizontal) or left (vertical) part, and the phone bar takes
    * the bottom or right part, with PHONE_BAR_GAP between them. This happens
-   * after the Bluetooth adjustment so both bars are the same length.
+   * after the Bluetooth adjustment so both bars are the same length. With
+   * the space sized as DUAL_BAR_THICK, the watch bar comes out at
+   * WATCH_BAR_THICK_DUAL.
    */
   L->show_phone = s_settings.phone_battery && s_phone_battery >= 0;
   if (L->show_phone) {
