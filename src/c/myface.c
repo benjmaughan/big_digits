@@ -70,6 +70,7 @@
  *     Space it takes from the battery bar ... BT_ICON_GAP
  *     Vibration patterns ..... BT_VIBE_DISCONNECT_PATTERN,
  *                              BT_VIBE_RECONNECT_PATTERN
+ *   Notification (Quick View) resizing ... MIN_SEG_T, fit_rows()
  *   Default settings ......... settings_load() in section 2
  *
  * LAYOUTS
@@ -93,7 +94,8 @@
  *   2. Settings        (load / save / defaults, and the color palettes)
  *   3. Layout          (works out where everything goes for each layout)
  *   4. Drawing         (digits, battery, date)
- *   5. Time + events   (minute tick, battery events, messages from phone)
+ *   5. Time + events   (minute tick, battery events, messages from phone,
+ *                       notifications covering the screen)
  *   6. Window + app lifecycle
  */
 
@@ -361,6 +363,21 @@ enum {
 #define PHONE_COLOR_MID   GColorOrange         /* 21-40%                     */
 #define PHONE_COLOR_LOW   GColorRed            /* 20% and below              */
 
+/*
+ * ---- Timeline Quick View ----
+ * When a notification or upcoming event "peeks" in from the bottom of the
+ * screen, the face fits itself into the part left visible (about 117 of the
+ * 168 rows on Pebble Time), following the notification as it slides in and
+ * out:
+ *   - the date is hidden, since it would be underneath the notification;
+ *   - the digits get shorter (and their segments proportionally thinner,
+ *     but never thinner than MIN_SEG_T) to fit above it;
+ *   - vertical battery bars get shorter; a horizontal bar moves up.
+ * The side-bar-with-vertical-date layout switches to the plain side-bar
+ * arrangement while covered, because its date column can't fit.
+ */
+#define MIN_SEG_T         6  /* thinnest the digit segments may get          */
+
 /* ---- Persistent storage key ---- */
 #define SETTINGS_KEY      5  /* change only if existing fields are reordered
                                 or removed; new fields go at the end of the
@@ -518,6 +535,7 @@ typedef struct {
   int phone_thick;        /* thickness of the phone bar for this layout      */
 
   /* Date */
+  bool show_date;         /* false while a notification covers the bottom    */
   bool date_vertical;     /* true = one character per line                   */
   GRect date_rect;        /* box the date is drawn in                        */
 
@@ -527,14 +545,53 @@ typedef struct {
 } Layout;
 
 /*
- * Work out all positions for the layout chosen in the settings.
- * `b` is the bounds of the full-screen canvas (144 x 168 on Pebble Time).
+ * Squeeze the two rows of digits into the vertical space from `top` to
+ * `bottom`, with `gap` pixels between the rows. Digits that already fit
+ * keep their size; otherwise they get shorter, and their segments thinner
+ * in proportion (never below MIN_SEG_T), so they keep their look. Only
+ * the height changes: the width is left as the layout set it.
  */
-static void layout_compute(Layout *L, GRect b) {
+static void fit_rows(Layout *L, int top, int bottom, int gap) {
+  const int max_h = (bottom - top - gap) / 2;
+  if (L->digit_h > max_h) {
+    int t = L->seg_t * max_h / L->digit_h;
+    if (t < MIN_SEG_T) t = MIN_SEG_T;
+    L->seg_t   = t;
+    L->digit_h = max_h;
+  }
+  L->row1_y = top;
+  L->row2_y = top + L->digit_h + gap;
+}
+
+/*
+ * Work out all positions for the layout chosen in the settings.
+ *
+ *   b     : the bounds of the full-screen canvas (144 x 168 on Pebble Time)
+ *   vis_h : how much of that height is visible. Less than b.size.h while a
+ *           Timeline Quick View notification covers the bottom of the
+ *           screen, and in between while it slides in or out.
+ *
+ * While part of the screen is covered, the date is hidden (it would be
+ * under the notification) and the digits and battery bar are fitted into
+ * the visible area above it. See "TIMELINE QUICK VIEW" in section 1.
+ */
+static void layout_compute(Layout *L, GRect b, int vis_h) {
   const int w = b.size.w;
   const int h = b.size.h;
+  const bool covered = vis_h < h;
 
-  L->show_bt = false;   /* switched on at the end if we are disconnected */
+  L->show_bt   = false;   /* switched on at the end if we are disconnected */
+  L->show_date = !covered;
+
+  /* While covered, the side-bar-with-vertical-date layout switches to the
+   * plain side-bar arrangement: its date column runs the full height, so it
+   * can't fit above the notification, and without it the digits can use
+   * that width. */
+  int layout = s_settings.layout;
+  const bool vdate_covered = covered && layout == LAYOUT_SIDE_BAR_VDATE;
+  if (vdate_covered) {
+    layout = LAYOUT_SIDE_BAR;
+  }
 
   /* Thickness of the battery bar space: wider when it holds two bars. */
   const bool dual  = s_settings.phone_battery;
@@ -542,7 +599,7 @@ static void layout_compute(Layout *L, GRect b) {
   const int  vbar  = dual ? DUAL_BAR_THICK : VBAR_W;      /* vertical   */
   L->phone_thick   = PHONE_BAR_THICK;   /* SIDE_BAR overrides this below */
 
-  switch (s_settings.layout) {
+  switch (layout) {
 
     case LAYOUT_SIDE_BAR: {
       /*
@@ -551,9 +608,12 @@ static void layout_compute(Layout *L, GRect b) {
        * The digits get whatever width is left after the bar and margins,
        * so they are narrower than in the standard layout.
        */
-      /* This layout has its own, thicker dual-bar size. */
-      const int sb_bar = dual ? SB_DUAL_BAR_THICK : VBAR_W;
-      L->phone_thick   = SB_PHONE_BAR_THICK;
+      /* This layout has its own, thicker dual-bar size. (The vertical-date
+       * layout borrows this arrangement while covered, but keeps its own
+       * bar size.) */
+      const int sb_bar = vdate_covered ? vbar
+                       : dual          ? SB_DUAL_BAR_THICK : VBAR_W;
+      L->phone_thick   = vdate_covered ? PHONE_BAR_THICK : SB_PHONE_BAR_THICK;
 
       const int avail = w - SIDE_MARGIN - BAR_GAP - sb_bar - SIDE_MARGIN;
 
@@ -565,10 +625,18 @@ static void layout_compute(Layout *L, GRect b) {
       L->row1_y    = SB_ROW1_Y;
       L->row2_y    = SB_ROW2_Y;
 
-      /* Bar: full height, flush with the right-hand margin. */
+      /* Bar: full (visible) height, flush with the right-hand margin. */
       L->battery_vertical = true;
       L->battery_rect = GRect(w - SIDE_MARGIN - sb_bar, VBAR_MARGIN_Y,
-                              sb_bar, h - 2 * VBAR_MARGIN_Y);
+                              sb_bar, vis_h - 2 * VBAR_MARGIN_Y);
+
+      /* Covered: the date is hidden, so the digits can use everything
+       * above the notification, with the same margin at the bottom as at
+       * the top. */
+      if (covered) {
+        fit_rows(L, SB_ROW1_Y, vis_h - SB_ROW1_Y,
+                 SB_ROW2_Y - SB_ROW1_Y - SB_DIGIT_H);
+      }
 
       /* Date: same strip at the bottom, but only as wide as the area to
        * the left of a single bar. It keeps that width when the bars are
@@ -646,6 +714,18 @@ static void layout_compute(Layout *L, GRect b) {
       L->battery_vertical = false;
       L->battery_rect = GRect(HBAR_MARGIN, HBAR_Y - extra,
                               w - 2 * HBAR_MARGIN, hbar);
+
+      /* Covered: the date is hidden; the bar moves down to just above the
+       * notification and the digits fill the space above the bar. */
+      if (covered) {
+        const int row_gap = STD_ROW2_Y - STD_ROW1_Y - STD_DIGIT_H;
+        int bar_y = vis_h - HBAR_MARGIN - hbar;
+        if (bar_y > L->battery_rect.origin.y) {
+          bar_y = L->battery_rect.origin.y;   /* never lower than normal */
+        }
+        L->battery_rect.origin.y = bar_y;
+        fit_rows(L, STD_ROW1_Y, bar_y - row_gap, row_gap);
+      }
 
       /* Date: full-width strip at the bottom. */
       L->date_vertical = false;
@@ -1297,8 +1377,16 @@ static void draw_date_vertical(GContext *ctx, GRect col, GColor color) {
 static void canvas_update(Layer *layer, GContext *ctx) {
   const GRect bounds = layer_get_bounds(layer);
 
+  /* The part of the screen not covered by a Timeline Quick View
+   * notification (the whole screen when there isn't one). */
+#if PBL_API_EXISTS(layer_get_unobstructed_bounds)
+  const int vis_h = layer_get_unobstructed_bounds(layer).size.h;
+#else
+  const int vis_h = bounds.size.h;
+#endif
+
   Layout L;
-  layout_compute(&L, bounds);
+  layout_compute(&L, bounds, vis_h);
 
   Palette P;
   palette_get(&P);
@@ -1327,8 +1415,10 @@ static void canvas_update(Layer *layer, GContext *ctx) {
     draw_bt_icon(ctx, L.bt_rect, &P);
   }
 
-  /* Date, in the same color as the digits. */
-  if (L.date_vertical) {
+  /* Date, in the same color as the digits (hidden under a notification). */
+  if (!L.show_date) {
+    /* nothing */
+  } else if (L.date_vertical) {
     draw_date_vertical(ctx, L.date_rect, P.digits);
   } else {
     draw_date_horizontal(ctx, L.date_rect, P.digits);
@@ -1441,6 +1531,19 @@ static void connection_handler(bool connected) {
     layer_mark_dirty(s_canvas);
   }
 }
+
+#if PBL_API_EXISTS(unobstructed_area_service_subscribe)
+/*
+ * Called on every animation frame while a Timeline Quick View notification
+ * slides in or out. The canvas works out the visible area itself each time
+ * it is drawn, so all we need to do is redraw.
+ */
+static void unobstructed_change(AnimationProgress progress, void *context) {
+  if (s_canvas) {
+    layer_mark_dirty(s_canvas);
+  }
+}
+#endif
 
 /* Called once a minute by the tick timer service. */
 static void tick_handler(struct tm *tick_time, TimeUnits units_changed) {
@@ -1602,6 +1705,14 @@ static void init(void) {
     .pebble_app_connection_handler = connection_handler,
   });
 
+  /* Resize the face when a Timeline Quick View notification covers the
+   * bottom of the screen. */
+#if PBL_API_EXISTS(unobstructed_area_service_subscribe)
+  unobstructed_area_service_subscribe((UnobstructedAreaHandlers) {
+    .change = unobstructed_change,
+  }, NULL);
+#endif
+
   /* Receive settings and the phone battery level from the phone, and send
    * phone-battery requests. Small buffers are plenty. */
   app_message_register_inbox_received(inbox_received);
@@ -1612,6 +1723,9 @@ static void deinit(void) {
   tick_timer_service_unsubscribe();
   battery_state_service_unsubscribe();
   connection_service_unsubscribe();
+#if PBL_API_EXISTS(unobstructed_area_service_unsubscribe)
+  unobstructed_area_service_unsubscribe();
+#endif
   window_destroy(s_window);
 #if DATE_USE_CUSTOM_FONT
   fonts_unload_custom_font(s_date_font);
