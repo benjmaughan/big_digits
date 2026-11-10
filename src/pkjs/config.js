@@ -28,11 +28,12 @@ module.exports = [
         "type": "select",
         "messageKey": "DateFormat",
         "label": "Date format",
-        "description": "Numeric shows day | month | year with bars between the fields.",
-        "defaultValue": "1",
+        "description": "Numeric shows day | month | year with bars between the fields. Segment digits draws the numbers in the same style as the time.",
+        "defaultValue": "2",
         "options": [
           { "label": "Text (Fri Nov 06)",       "value": "0" },
-          { "label": "Numeric (06 | 11 | 26)",  "value": "1" }
+          { "label": "Numeric (06 | 11 | 26)",  "value": "1" },
+          { "label": "Numeric, segment digits (06-11-26)", "value": "2" }
         ]
       }
     ]
