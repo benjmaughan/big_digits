@@ -21,7 +21,9 @@
  *                           instead of solid, merged bars.
  *   3. Segmented battery  : 10 full/hollow blocks instead of a smooth bar.
  *   4. Layout             : where the battery and date go (see below).
- *   5. Date format        : text ("Fri Nov 06") or numeric ("06 | 11 | 26").
+ *   5. Date format        : text ("Fri Nov 06"), numeric ("06 | 11 | 26"),
+ *                           or numeric drawn in segment digits like the
+ *                           time ("06-11-26").
  *                           In the numeric format the fields are separated
  *                           by vertical bars when the date is horizontal,
  *                           and by horizontal bars when it is vertical.
@@ -44,6 +46,12 @@
  *     Vertical date, numeric . VDATE_NUM_FONT_KEY, VDATE_NUM_PITCH,
  *                              VDATE_NUM_GAP, VDATE_NUM_NUDGE
  *     Width of vertical date column ... SBV_DATE_COL_W
+ *   Numeric date in segment digits
+ *     Horizontal date ........ SDATE_DIGIT_W, SDATE_DIGIT_H, SDATE_SEG_T,
+ *                              SDATE_DIGIT_GAP, SDATE_DASH_W,
+ *                              SDATE_SEP_PAD, SDATE_Y_NUDGE
+ *     Vertical date .......... SVDATE_DIGIT_W, SVDATE_DIGIT_H, SVDATE_SEG_T,
+ *                              SVDATE_DIGIT_GAP
  *   Numeric-date separator bars
  *     Horizontal date ........ DATE_SEP_THICK, DATE_SEP_LEN, DATE_SEP_PAD,
  *                              DATE_SEP_Y_NUDGE
@@ -117,6 +125,7 @@ enum {
 enum {
   DATE_FORMAT_TEXT     = 0,  /* "Fri Nov 06"                                 */
   DATE_FORMAT_NUMERIC  = 1,  /* "06 | 11 | 26"  (day | month | 2-digit year) */
+  DATE_FORMAT_NUMERIC_SEG = 2, /* the same, drawn in segments like the time   */
   DATE_FORMAT_COUNT          /* number of formats; used for range checks     */
 };
 
@@ -278,6 +287,41 @@ enum {
                                    padding; raise it to move digits up       */
 
 /*
+ * ---- Numeric date in segment digits (date format "Numeric, segment") ----
+ * The date's digits are drawn from segments exactly like the time, in the
+ * same gapped or solid style, just smaller.
+ *
+ * Horizontal date (STANDARD and SIDE_BAR layouts): 06-11-26
+ *   The fields are separated by a short dash at mid-height, drawn like a
+ *   segment, rather than a "|" bar: in segment style a 1 is a single
+ *   vertical stroke, so "11" between two bars would read as four bars.
+ *
+ *   width = 6 * SDATE_DIGIT_W + 3 * SDATE_DIGIT_GAP
+ *           + 2 * (2 * SDATE_SEP_PAD + SDATE_DASH_W)
+ *   which must fit the date box (118 px in the side-bar layout with the
+ *   phone bar on). If it doesn't, the digits are narrowed automatically.
+ */
+#define SDATE_DIGIT_W      14  /* width of one date digit                    */
+#define SDATE_DIGIT_H      24  /* height of one date digit                   */
+#define SDATE_SEG_T         3  /* segment thickness                          */
+#define SDATE_DIGIT_GAP     2  /* gap between the two digits of a field      */
+#define SDATE_DASH_W        6  /* length of the dash between fields          */
+#define SDATE_SEP_PAD       3  /* space either side of a dash                */
+#define SDATE_Y_NUDGE       0  /* move the date down (+) or up (-)           */
+
+/*
+ * Vertical date (SIDE_BAR_VDATE layout): two digits per field, stacked,
+ * with a short horizontal bar (VDATE_SEP_LEN, DATE_SEP_THICK) between
+ * fields. Stacked 1s can't be confused with it, so it stays a thin bar.
+ *   height = 6 * SVDATE_DIGIT_H + 3 * SVDATE_DIGIT_GAP + 2 * VDATE_NUM_GAP
+ *   which must be at most 168. Keep SVDATE_DIGIT_W within SBV_DATE_COL_W.
+ */
+#define SVDATE_DIGIT_W     14
+#define SVDATE_DIGIT_H     20
+#define SVDATE_SEG_T        3
+#define SVDATE_DIGIT_GAP    4  /* gap between the two digits of a field      */
+
+/*
  * ---- Bluetooth-disconnected indicator ----
  * While the watch is disconnected from the phone, a Bluetooth symbol with a
  * slash through it is drawn at one end of the battery bar, and the bar gives
@@ -426,7 +470,8 @@ static void settings_load(void) {
     .layout            = LAYOUT_SIDE_BAR,
     /* .layout            = LAYOUT_SIDE_BAR_VDATE, */
     /* .date_format       = DATE_FORMAT_TEXT, */
-    .date_format       = DATE_FORMAT_NUMERIC,
+    /* .date_format       = DATE_FORMAT_NUMERIC, */
+    .date_format       = DATE_FORMAT_NUMERIC_SEG,
     /* .bt_vibrate        = BT_VIBE_OFF, */
     /* .bt_vibrate        = BT_VIBE_DISCONNECT, */
     .bt_vibrate        = BT_VIBE_BOTH,
@@ -836,11 +881,9 @@ static void draw_vseg(GContext *ctx, int x, int y, int len, int t) {
  *   Gapped     : seven pointed hexagonal segments separated by a small
  *                gap at every corner, like a Casio LCD.
  */
-static void draw_digit(GContext *ctx, int d, int x, int y, const Layout *L) {
+static void draw_seg_digit(GContext *ctx, int d, int x, int y,
+                           int w, int h, int t) {
   const uint8_t s = SEGMENTS[d];     /* which segments are lit              */
-  const int w = L->digit_w;
-  const int h = L->digit_h;
-  const int t = L->seg_t;
   const int half = t / 2;
 
   if (!s_settings.digit_gaps) {
@@ -857,7 +900,9 @@ static void draw_digit(GContext *ctx, int d, int x, int y, const Layout *L) {
     if (s & 0x40) fill(ctx, x,         y + mid_y,          w, t);                 /* g */
   } else {
     /* ---- Gapped (LCD) style ---- */
-    const int g    = 2;                       /* gap at each segment corner */
+    /* Gap at each segment corner: 2 px, or 1 px on small, thin digits
+     * (such as the date) where 2 px would look too gappy. */
+    const int g    = (t >= 6) ? 2 : 1;
     const int ymid = y + h / 2;               /* centre line of the digit   */
 
     /* Horizontal segments start and end just inside the vertical ones. */
@@ -882,6 +927,11 @@ static void draw_digit(GContext *ctx, int d, int x, int y, const Layout *L) {
     if (s & 0x10) draw_vseg(ctx, x,         low_y,     low_len, t);  /* e */
     if (s & 0x04) draw_vseg(ctx, x + w - t, low_y,     low_len, t);  /* c */
   }
+}
+
+/* Draw one time digit, using the size and thickness of the current layout. */
+static void draw_digit(GContext *ctx, int d, int x, int y, const Layout *L) {
+  draw_seg_digit(ctx, d, x, y, L->digit_w, L->digit_h, L->seg_t);
 }
 
 /* ---------- Colors ---------- */
@@ -1276,9 +1326,102 @@ static void draw_date_numeric_horizontal(GContext *ctx, GRect area,
   }
 }
 
+/*
+ * Draw a two-digit field ("06") in segment digits, side by side starting
+ * at (x, y), or one above the other if `stacked`.
+ */
+static void draw_seg_field(GContext *ctx, const char *field, int x, int y,
+                           int w, int h, int t, int gap, bool stacked) {
+  for (int i = 0; i < 2 && field[i] != '\0'; i++) {
+    const int d = field[i] - '0';
+    if (d < 0 || d > 9) continue;
+    if (stacked) {
+      draw_seg_digit(ctx, d, x, y + i * (h + gap), w, h, t);
+    } else {
+      draw_seg_digit(ctx, d, x + i * (w + gap), y, w, h, t);
+    }
+  }
+}
+
+/*
+ * Draw the numeric date on one line in segment digits, like the time:
+ *
+ *     06-11-26      (day - month - two-digit year)
+ *
+ * Centred in `area`. If the SDATE_* sizes would be too wide for the area,
+ * the digits are narrowed to fit (their height stays the same).
+ */
+static void draw_date_seg_horizontal(GContext *ctx, GRect area,
+                                     GColor color) {
+  const char *fields[3] = { s_dom, s_mon_num, s_yr };
+
+  /* Everything except the six digits themselves. */
+  const int fixed = 3 * SDATE_DIGIT_GAP
+                    + 2 * (2 * SDATE_SEP_PAD + SDATE_DASH_W);
+  int dw = SDATE_DIGIT_W;
+  if (6 * dw + fixed > area.size.w) {
+    dw = (area.size.w - fixed) / 6;
+  }
+  const int field_w = 2 * dw + SDATE_DIGIT_GAP;
+  const int total   = 6 * dw + fixed;
+
+  const int y = area.origin.y + (area.size.h - SDATE_DIGIT_H) / 2
+                + SDATE_Y_NUDGE;
+  /* Dashes sit where a digit's middle segment would be. */
+  const int dash_y = y + (SDATE_DIGIT_H - SDATE_SEG_T) / 2;
+  int x = area.origin.x + (area.size.w - total) / 2;   /* centre the group */
+
+  graphics_context_set_fill_color(ctx, color);
+  for (int i = 0; i < 3; i++) {
+    draw_seg_field(ctx, fields[i], x, y, dw, SDATE_DIGIT_H, SDATE_SEG_T,
+                   SDATE_DIGIT_GAP, false);
+    x += field_w;
+
+    if (i < 2) {
+      /* A dash in the same style as the digits' segments. */
+      x += SDATE_SEP_PAD;
+      if (s_settings.digit_gaps) {
+        draw_hseg(ctx, x, dash_y, SDATE_DASH_W, SDATE_SEG_T);
+      } else {
+        fill(ctx, x, dash_y, SDATE_DASH_W, SDATE_SEG_T);
+      }
+      x += SDATE_DASH_W + SDATE_SEP_PAD;
+    }
+  }
+}
+
+/*
+ * Draw the numeric date down a narrow column in segment digits: each field
+ * is two digits stacked, with a short horizontal bar between fields. The
+ * whole stack is centred in `col`.
+ */
+static void draw_date_seg_vertical(GContext *ctx, GRect col, GColor color) {
+  const char *fields[3] = { s_dom, s_mon_num, s_yr };
+  const int field_h = 2 * SVDATE_DIGIT_H + SVDATE_DIGIT_GAP;
+  const int total   = 3 * field_h + 2 * VDATE_NUM_GAP;
+  const int x = col.origin.x + (col.size.w - SVDATE_DIGIT_W) / 2;
+  int y = col.origin.y + (col.size.h - total) / 2;
+
+  graphics_context_set_fill_color(ctx, color);
+  for (int i = 0; i < 3; i++) {
+    draw_seg_field(ctx, fields[i], x, y, SVDATE_DIGIT_W, SVDATE_DIGIT_H,
+                   SVDATE_SEG_T, SVDATE_DIGIT_GAP, true);
+    y += field_h;
+
+    if (i < 2) {
+      fill(ctx, col.origin.x + (col.size.w - VDATE_SEP_LEN) / 2,
+           y + (VDATE_NUM_GAP - DATE_SEP_THICK) / 2,
+           VDATE_SEP_LEN, DATE_SEP_THICK);
+      y += VDATE_NUM_GAP;
+    }
+  }
+}
+
 /* Draw the horizontal date in whichever format is selected. */
 static void draw_date_horizontal(GContext *ctx, GRect area, GColor color) {
-  if (s_settings.date_format == DATE_FORMAT_NUMERIC) {
+  if (s_settings.date_format == DATE_FORMAT_NUMERIC_SEG) {
+    draw_date_seg_horizontal(ctx, area, color);
+  } else if (s_settings.date_format == DATE_FORMAT_NUMERIC) {
     draw_date_numeric_horizontal(ctx, area, color);
   } else {
     draw_date_text_horizontal(ctx, area, color);
@@ -1312,6 +1455,11 @@ static void draw_date_horizontal(GContext *ctx, GRect area, GColor color) {
  * for the selected format.
  */
 static void draw_date_vertical(GContext *ctx, GRect col, GColor color) {
+  if (s_settings.date_format == DATE_FORMAT_NUMERIC_SEG) {
+    draw_date_seg_vertical(ctx, col, color);
+    return;
+  }
+
   const bool numeric = (s_settings.date_format == DATE_FORMAT_NUMERIC);
 
   /* Pick the three groups of characters and the metrics for this format. */
