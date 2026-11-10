@@ -236,7 +236,7 @@ enum {
 
 /* ---- SIDE_BAR layout: digits ---- */
 #define SB_DIGIT_H       65  /* digit height (width is worked out to fit)    */
-#define SB_SEG_T         10  /* segment thickness                            */
+#define SB_SEG_T          9  /* segment thickness                            */
 #define SB_DIGIT_GAP      8  /* gap between the two digits of a row          */
 #define SB_ROW1_Y         2
 #define SB_ROW2_Y        73
@@ -423,8 +423,8 @@ static void settings_load(void) {
     .digit_gaps        = true,
     .segmented_battery = true,
     /* .layout            = LAYOUT_STANDARD, */
-    /* .layout            = LAYOUT_SIDE_BAR, */
-    .layout            = LAYOUT_SIDE_BAR_VDATE,
+    .layout            = LAYOUT_SIDE_BAR,
+    /* .layout            = LAYOUT_SIDE_BAR_VDATE, */
     /* .date_format       = DATE_FORMAT_TEXT, */
     .date_format       = DATE_FORMAT_NUMERIC,
     /* .bt_vibrate        = BT_VIBE_OFF, */
