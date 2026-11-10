@@ -249,6 +249,8 @@ enum {
 #define SB_DIGIT_GAP      8  /* gap between the two digits of a row          */
 #define SB_ROW1_Y         2
 #define SB_ROW2_Y        73
+#define SB_SDATE_GAP     10  /* space between the time digits and a segment-
+                                digit date below them (matches BAR_GAP)      */
 
 /* ---- SIDE_BAR_VDATE layout: digits and date column ---- */
 #define SBV_DIGIT_H      76  /* taller digits: the date no longer needs the
@@ -298,8 +300,9 @@ enum {
  *
  *   width = 6 * SDATE_DIGIT_W + 3 * SDATE_DIGIT_GAP
  *           + 2 * (2 * SDATE_SEP_PAD + SDATE_DASH_W)
- *   which must fit the date box (118 px in the side-bar layout with the
- *   phone bar on). If it doesn't, the digits are narrowed automatically.
+ *   which must fit the date box. In the side-bar layout the box is the
+ *   width of the time digits (108 px with the phone bar on); if the date
+ *   doesn't fit, its digits are narrowed automatically (to 13 px there).
  */
 #define SDATE_DIGIT_W      14  /* width of one date digit                    */
 #define SDATE_DIGIT_H      24  /* height of one date digit                   */
@@ -699,6 +702,30 @@ static void layout_compute(Layout *L, GRect b, int vis_h) {
         date_w = bar_left - SIDE_MARGIN;
       }
       L->date_rect = GRect(SIDE_MARGIN, DATE_Y, date_w, DATE_H);
+
+      /*
+       * Segment-digit date: give it the same breathing room as the time.
+       *   - Horizontally it sits in the time digits' column, so it is
+       *     BAR_GAP away from the bars, just like the time digits.
+       *   - Vertically its bottom lines up with the bottom of the bars, and
+       *     it is SB_SDATE_GAP below the time digits. The time digits get
+       *     shorter to make room (their width and segments don't change).
+       * If the date is wider than the column, its digits narrow to fit
+       * (see draw_date_seg_horizontal).
+       */
+      if (!covered && s_settings.date_format == DATE_FORMAT_NUMERIC_SEG) {
+        const int date_top = h - VBAR_MARGIN_Y - SDATE_DIGIT_H;
+        const int col_w    = 2 * L->digit_w + L->digit_gap;
+        L->date_rect = GRect(L->x0, date_top, col_w, SDATE_DIGIT_H);
+
+        const int row_gap = SB_ROW2_Y - SB_ROW1_Y - SB_DIGIT_H;
+        const int max_h   = (date_top - SB_SDATE_GAP - SB_ROW1_Y - row_gap) / 2;
+        if (L->digit_h > max_h) {
+          L->digit_h = max_h;
+        }
+        L->row1_y = SB_ROW1_Y;
+        L->row2_y = SB_ROW1_Y + L->digit_h + row_gap;
+      }
       break;
     }
 
