@@ -407,7 +407,7 @@ enum {
  * bar). Any of the 64 Pebble Time colors can be used, e.g. GColorPictonBlue,
  * GColorCyan, GColorVividViolet, GColorMagenta, GColorChromeYellow. */
 #define PHONE_COLOR_HIGH  GColorVividCerulean  /* above 40%                  */
-#define PHONE_COLOR_MID   GColorOrange         /* 21-40%                     */
+#define PHONE_COLOR_MID   GColorVividViolet    /* 21-40%                     */
 #define PHONE_COLOR_LOW   GColorRed            /* 20% and below              */
 
 /*
